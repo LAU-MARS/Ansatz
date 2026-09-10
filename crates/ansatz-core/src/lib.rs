@@ -28,8 +28,11 @@
 
 extern crate alloc;
 
+pub mod assembly;
+pub mod linalg;
 pub mod model;
 pub mod report;
+pub mod so3;
 pub mod solver;
 
 pub use model::{

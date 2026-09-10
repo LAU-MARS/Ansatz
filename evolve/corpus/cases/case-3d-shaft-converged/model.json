@@ -1,0 +1,15 @@
+{
+  "entities": [
+    { "id": 1, "geometry": { "type": "rigid3", "pose": { "translation": { "x": 0.0, "y": 0.0, "z": 0.0 }, "rotation": { "vector": [0.0, 0.0, 0.0] } } } },
+    { "id": 2, "geometry": { "type": "rigid3", "pose": { "translation": { "x": 0.5, "y": 0.3, "z": 1.2 }, "rotation": { "vector": [0.1, -0.2, 0.15] } } } }
+  ],
+  "constraints": [
+    { "id": 90, "kind": { "type": "fixed", "a": 1 } },
+    { "id": 1, "kind": { "type": "coaxial", "a": 1, "b": 2,
+        "a_axis": { "origin": { "x": 0.0, "y": 0.0, "z": 0.0 }, "direction": { "x": 0.0, "y": 0.0, "z": 1.0 } },
+        "b_axis": { "origin": { "x": 0.1, "y": 0.2, "z": 0.3 }, "direction": { "x": 0.1, "y": 0.2, "z": 1.0 } } } },
+    { "id": 2, "kind": { "type": "distance", "a": 2, "b": 1, "value": 2.0 } },
+    { "id": 3, "kind": { "type": "angle", "a": 1, "b": 2, "value": 1.5707963267948966,
+        "a_dir": { "x": 1.0, "y": 0.0, "z": 0.0 }, "b_dir": { "x": 0.0, "y": 1.0, "z": 0.0 } } }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "description": "3D 全约束装配（fixed + coaxial + distance + angle）：LM 迭代解的位级基准。迭代求解器跨平台位级一致性的真检验——任何求值顺序/libm 差异都会暴露",
+  "outcome": "converged",
+  "dof_total": 12,
+  "dof_remaining": 0,
+  "entities": [
+    { "id": 1, "pose": { "tx": "0x0000000000000000", "ty": "0x0000000000000000", "tz": "0x0000000000000000",
+                          "rx": "0x0000000000000000", "ry": "0x0000000000000000", "rz": "0x0000000000000000" } },
+    { "id": 2, "pose": { "tx": "0xBFB1D4C0C54DFE02", "ty": "0xBFC166BE27E77C7D", "tz": "0x3FFFE8125C41A4D1",
+                          "rx": "0x3FC91FA45A6EF51A", "ry": "0xBFB96EDC01A1C38A", "rz": "0xBF840C83A508E8EF" } }
+  ],
+  "max_residual_abs": "0x3D7C2E0000000000",
+  "jacobian_condition_estimate": "0x4017AE774755A209"
+}

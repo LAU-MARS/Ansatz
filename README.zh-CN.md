@@ -18,9 +18,17 @@
 - **2D 草图约束**：重合、共线、平行、垂直、相切、距离、角度、对称、固定
 - **3D 装配约束**：6-DOF 刚体配合——贴合、同轴、距离、角度
 
-## 当前阶段：骨架（端到端管线已通，算法留白）
+## 当前阶段：3D 装配约束已实现
 
-⚠️ 本仓库处于**阶段 0：骨架与平台可行性验证**。`ansatz-core::solve` 只实现一个平凡算例（**2D 点 + 到原点的距离约束**，闭式解 `p' = p·(d/‖p‖)`），其余约束类型返回 `unsupported_constraint` 工具错误。数据模型、诊断结构、四个壳、schema 契约、CI（含位级一致性测试框架）均已就位并验证；通用数值求解（Newton/LM、稀疏雅可比、秩分析）属于后续阶段，届时只替换 `ansatz-core/src/solver.rs`。
+✅ **3D 装配约束（6-DOF 刚体）已可求解**：mate（面贴合）、coaxial（同轴）、
+distance（原点距）、angle（方向夹角）、fixed（固定），数值内核为
+Levenberg–Marquardt + SO(3) 指数映射解析雅可比（FD 交叉验证）+ SVD 秩分析
+（DOF/冗余/条件数诊断）。全约束装配实测 4 次迭代收敛到残差 ~1e-13，且
+**迭代解跨平台位级一致**（见 parity case3）。
+
+⚠️ 尚未实现：通用 2D 草图约束（coincident/parallel/tangent 等，对 rigid3
+以外实体仍返回 `unsupported_constraint` 工具错误）。阶段 0 的 2D 点距离
+闭式解路径原样保留（位级契约冻结）。
 
 ## 架构
 
@@ -172,7 +180,10 @@ cargo run -p ansatz-cli -- export-schema solve-report
    - wasm Node 冒烟（`crates/ansatz-wasm/smoke/node.mjs`）
    - node 原生冒烟（`crates/ansatz-node/smoke/native.mjs`）
 
-   `case2`（点 (1,1) 归一化）走真实 sqrt/除法舍入路径，是跨架构一致性的真金火检验；当前已在 x86-64（Rust 原生 + Python 参照 + wasm + node）上逐位一致。
+   `case2`（2D 非精确路径）与 `case3`（**3D 全约束装配的 LM 迭代解**）是跨架构
+一致性的真金火检验；case3 已在 x86-64 的 debug/release/wasm/node 上逐位一致。
+JSON 往返同样在承诺内——serde_json 全线启用 `float_roundtrip`（默认快速解析
+对某些 17 位小数差 1 ULP，被 evolve 黄金语料实测咬到过）。
 
 ## 3D 刚体位姿参数化
 
@@ -195,13 +206,13 @@ cargo run -p ansatz-cli -- export-schema solve-report
 
 ## 路线图
 
-1. **阶段 0（本仓库）**：骨架——管线、诊断框架、契约、CI、位级一致性设施全通
-2. 阶段 1：通用数值核心（阻尼 Newton / Levenberg–Marquardt + 稀疏雅可比）
-3. 阶段 2：真实秩分析（DOF / 冗余 / 冲突的判定不再靠计数近似）
-4. 阶段 3：2D 草图约束全集 → 3D 装配约束（贴合/同轴/距离/角度）
+1. ~~阶段 0：骨架——管线、诊断框架、契约、CI、位级一致性设施~~ ✅
+2. ~~阶段 1：通用数值核心（LM + 解析雅可比）~~ ✅（3D 路径；稠密线性代数手写）
+3. ~~阶段 2：真实秩分析~~ ✅（SVD 秩 + 贪心冗余判定；冲突距离有可证明捷径）
+4. 阶段 3（进行中）：3D 装配约束（mate/coaxial/distance/angle/fixed）✅ → 2D 草图约束全集（待做）
 5. 阶段 4：HarmonyOS NAPI 交付物（基于 ansatz-ffi + OHOS NDK）
 
-并行轨道（evolve/）：A 手动提案（已就位）→ B 自动闭环 → C LLM 提案者 → D 语料共演化（RSI）。
+并行轨道（evolve/）：A 手动提案（已就位）→ B 自动闭环 → C LLM 提案者 → D 语料共演化（RSI）。黄金语料已含 3 个 3D 用例（含 LM 迭代解位模式）。
 
 ## 致谢
 

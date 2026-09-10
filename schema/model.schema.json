@@ -31,6 +31,23 @@
     "constraints"
   ],
   "$defs": {
+    "Axis3": {
+      "description": "3D 装配用的**体坐标系**轴：过 origin、方向 direction（不必单位化，求解时归一）。",
+      "type": "object",
+      "properties": {
+        "direction": {
+          "$ref": "#/$defs/Vec3"
+        },
+        "origin": {
+          "$ref": "#/$defs/Vec3"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "direction"
+      ]
+    },
     "Constraint": {
       "description": "模型中的一条约束：稳定 id（模型内唯一）+ 种类参数 + 可选人类标签。",
       "type": "object",
@@ -229,13 +246,23 @@
           ]
         },
         {
-          "description": "角度（弧度）。`b = None` 表示相对参考系。",
+          "description": "角度（弧度）。2D：`b = None` 表示相对参考系（未实现）。\n3D 装配：a、b 为两个 Rigid3，`a_dir`/`b_dir` 为各自体坐标系内的参考方向\n（不必单位化），残差为 `dot(R_a·a_dir, R_b·b_dir) − cos(value)`。",
           "type": "object",
           "properties": {
             "a": {
               "type": "integer",
               "format": "uint32",
               "minimum": 0
+            },
+            "a_dir": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Vec3"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "b": {
               "type": [
@@ -244,6 +271,16 @@
               ],
               "format": "uint32",
               "minimum": 0
+            },
+            "b_dir": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Vec3"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "type": {
               "type": "string",
@@ -294,7 +331,7 @@
           ]
         },
         {
-          "description": "固定 a 的当前位形（不参与求解）。",
+          "description": "固定 a 的当前位形（不参与求解，自由度被结构性消去）。",
           "type": "object",
           "properties": {
             "a": {
@@ -314,7 +351,7 @@
           ]
         },
         {
-          "description": "3D 装配：两面贴合（法向相反、面上重合，6-DOF 刚体配合）。",
+          "description": "3D 装配：两面贴合——两面在世界系重合且法向相反（消 3 个自由度：\n法向平移 1 + 法向转动 2）。平面几何在各自**体坐标系**内给出。",
           "type": "object",
           "properties": {
             "a": {
@@ -322,10 +359,18 @@
               "format": "uint32",
               "minimum": 0
             },
+            "a_plane": {
+              "description": "a 体上的贴合面（体坐标系）。",
+              "$ref": "#/$defs/Plane3"
+            },
             "b": {
               "type": "integer",
               "format": "uint32",
               "minimum": 0
+            },
+            "b_plane": {
+              "description": "b 体上的贴合面（体坐标系）。",
+              "$ref": "#/$defs/Plane3"
             },
             "type": {
               "type": "string",
@@ -336,11 +381,13 @@
           "required": [
             "type",
             "a",
-            "b"
+            "b",
+            "a_plane",
+            "b_plane"
           ]
         },
         {
-          "description": "3D 装配：同轴。",
+          "description": "3D 装配：同轴——两轴共线且同向（消 4 个自由度：横向平移 2 + 偏轴转动 2；\n沿轴滑动与绕轴转动仍自由）。轴几何在各自**体坐标系**内给出。",
           "type": "object",
           "properties": {
             "a": {
@@ -348,10 +395,18 @@
               "format": "uint32",
               "minimum": 0
             },
+            "a_axis": {
+              "description": "a 体上的轴（体坐标系）。",
+              "$ref": "#/$defs/Axis3"
+            },
             "b": {
               "type": "integer",
               "format": "uint32",
               "minimum": 0
+            },
+            "b_axis": {
+              "description": "b 体上的轴（体坐标系）。",
+              "$ref": "#/$defs/Axis3"
             },
             "type": {
               "type": "string",
@@ -362,7 +417,9 @@
           "required": [
             "type",
             "a",
-            "b"
+            "b",
+            "a_axis",
+            "b_axis"
           ]
         }
       ]
@@ -509,6 +566,23 @@
             "pose"
           ]
         }
+      ]
+    },
+    "Plane3": {
+      "description": "3D 装配用的**体坐标系**平面：过 origin、法向 normal（不必单位化，求解时归一）。",
+      "type": "object",
+      "properties": {
+        "normal": {
+          "$ref": "#/$defs/Vec3"
+        },
+        "origin": {
+          "$ref": "#/$defs/Vec3"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "normal"
       ]
     },
     "Point2": {

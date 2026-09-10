@@ -1,0 +1,12 @@
+{
+  "entities": [
+    { "id": 1, "geometry": { "type": "rigid3", "pose": { "translation": { "x": 0.0, "y": 0.0, "z": 0.0 }, "rotation": { "vector": [0.0, 0.0, 0.0] } } } },
+    { "id": 2, "geometry": { "type": "rigid3", "pose": { "translation": { "x": 0.5, "y": 0.3, "z": 1.2 }, "rotation": { "vector": [0.1, -0.2, 0.15] } } } }
+  ],
+  "constraints": [
+    { "id": 90, "kind": { "type": "fixed", "a": 1 } },
+    { "id": 1, "kind": { "type": "mate", "a": 1, "b": 2,
+        "a_plane": { "origin": { "x": 0.0, "y": 0.0, "z": 1.0 }, "normal": { "x": 0.0, "y": 0.0, "z": 1.0 } },
+        "b_plane": { "origin": { "x": 0.0, "y": 0.0, "z": -0.5 }, "normal": { "x": 0.0, "y": 0.0, "z": -1.0 } } } }
+  ]
+}

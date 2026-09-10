@@ -50,3 +50,6 @@ cases/<case-id>/
 | `case-negative-distance` | Inconsistent (negative distance) + relax_constraint suggestion |
 | `case-empty-model` | Converged (exit 0) empty model |
 | `case-unsupported-coincident` | tool-error path (exit 2 + unsupported_constraint) |
+| `case-3d-shaft-converged` | 3D fully-constrained assembly (fixed + coaxial + distance + angle); **LM solution bit patterns** |
+| `case-3d-mate-underconstrained` | single mate removes 3 of 6 DOF |
+| `case-3d-conflict-distances` | provably inconsistent distance pair on rigid bodies |

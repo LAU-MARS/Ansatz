@@ -1,0 +1,7 @@
+{
+  "description": "同一对刚体的两个距离要求相差 1.0（> 容差）：可证明的不一致",
+  "outcome": "inconsistent",
+  "dof_total": 12,
+  "redundant_constraint_ids": [[1, 2]],
+  "suggestion_actions": ["remove_constraint:2"]
+}

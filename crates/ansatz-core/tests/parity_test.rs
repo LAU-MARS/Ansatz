@@ -50,18 +50,58 @@ fn run_case(name: &str) -> serde_json::Value {
     assert_eq!(got_entities.len(), want_entities.len(), "{name}: 实体数");
     for (g, w) in got_entities.iter().zip(want_entities) {
         assert_eq!(g["id"], w["id"], "{name}: 实体顺序按模型保持");
-        assert_bits(
-            name,
-            "x",
-            g["geometry"]["x"].as_f64().unwrap(),
-            w["x"].as_str().unwrap(),
-        );
-        assert_bits(
-            name,
-            "y",
-            g["geometry"]["y"].as_f64().unwrap(),
-            w["y"].as_str().unwrap(),
-        );
+        match g["geometry"]["type"].as_str() {
+            Some("point2") => {
+                assert_bits(
+                    name,
+                    "x",
+                    g["geometry"]["x"].as_f64().unwrap(),
+                    w["x"]
+                        .as_str()
+                        .unwrap_or_else(|| panic!("{name}: point2 期望 x")),
+                );
+                assert_bits(
+                    name,
+                    "y",
+                    g["geometry"]["y"].as_f64().unwrap(),
+                    w["y"]
+                        .as_str()
+                        .unwrap_or_else(|| panic!("{name}: point2 期望 y")),
+                );
+            }
+            Some("rigid3") => {
+                let pose = &g["geometry"]["pose"];
+                let want = w["pose"]
+                    .as_object()
+                    .unwrap_or_else(|| panic!("{name}: rigid3 期望 pose"));
+                for (field, path) in [
+                    ("tx", &pose["translation"]["x"]),
+                    ("ty", &pose["translation"]["y"]),
+                    ("tz", &pose["translation"]["z"]),
+                ] {
+                    assert_bits(
+                        name,
+                        field,
+                        path.as_f64().unwrap(),
+                        want[field]
+                            .as_str()
+                            .unwrap_or_else(|| panic!("{name}: 期望 {field}")),
+                    );
+                }
+                let rv = pose["rotation"]["vector"].as_array().unwrap();
+                for (field, v) in [("rx", &rv[0]), ("ry", &rv[1]), ("rz", &rv[2])] {
+                    assert_bits(
+                        name,
+                        field,
+                        v.as_f64().unwrap(),
+                        want[field]
+                            .as_str()
+                            .unwrap_or_else(|| panic!("{name}: 期望 {field}")),
+                    );
+                }
+            }
+            other => panic!("{name}: 未支持的 parity 实体类型 {other:?}"),
+        }
     }
 
     // 最大残差（按绝对值）与条件数估计同为位模式断言
@@ -91,7 +131,14 @@ fn parity_case1_exact_rational() {
 
 #[test]
 fn parity_case2_irrational_sqrt_path() {
-    // (1,1) 归一化：走真实 sqrt/除法路径，是跨架构逐位一致性的真金火检验。
+    // (1,1) 归一化：走真实 sqrt/除法 的非精确路径，是跨架构逐位一致性的真金火检验。
     let got = run_case("case2");
     assert_eq!(got["outcome"], "underconstrained");
+}
+
+#[test]
+fn parity_case3_rigid3_lm_solution() {
+    // 3D 全约束装配：LM 迭代解的逐位基准——迭代求解器跨平台一致性的真检验。
+    let got = run_case("case3");
+    assert_eq!(got["outcome"], "converged");
 }

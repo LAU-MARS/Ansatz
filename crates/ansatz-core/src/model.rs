@@ -78,6 +78,32 @@ pub struct Pose3 {
     pub rotation: Rotation3,
 }
 
+/// 3D 装配用的**体坐标系**平面：过 origin、法向 normal（不必单位化，求解时归一）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
+pub struct Plane3 {
+    pub origin: Vec3,
+    pub normal: Vec3,
+}
+
+/// 3D 装配用的**体坐标系**轴：过 origin、方向 direction（不必单位化，求解时归一）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
+pub struct Axis3 {
+    pub origin: Vec3,
+    pub direction: Vec3,
+}
+
 /// 几何实体。每个变体自带全部几何参数（骨架阶段不做参数共享/引用式建模）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -179,11 +205,23 @@ pub enum ConstraintKind {
         b: Option<EntityId>,
         value: f64,
     },
-    /// 角度（弧度）。`b = None` 表示相对参考系。
+    /// 角度（弧度）。2D：`b = None` 表示相对参考系（未实现）。
+    /// 3D 装配：a、b 为两个 Rigid3，`a_dir`/`b_dir` 为各自体坐标系内的参考方向
+    /// （不必单位化），残差为 `dot(R_a·a_dir, R_b·b_dir) − cos(value)`。
     Angle {
         a: EntityId,
         b: Option<EntityId>,
         value: f64,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        a_dir: Option<Vec3>,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        b_dir: Option<Vec3>,
     },
     /// a 与 b 关于 about（点/线/面）对称。
     Symmetric {
@@ -191,12 +229,28 @@ pub enum ConstraintKind {
         b: EntityId,
         about: EntityId,
     },
-    /// 固定 a 的当前位形（不参与求解）。
+    /// 固定 a 的当前位形（不参与求解，自由度被结构性消去）。
     Fixed { a: EntityId },
-    /// 3D 装配：两面贴合（法向相反、面上重合，6-DOF 刚体配合）。
-    Mate { a: EntityId, b: EntityId },
-    /// 3D 装配：同轴。
-    Coaxial { a: EntityId, b: EntityId },
+    /// 3D 装配：两面贴合——两面在世界系重合且法向相反（消 3 个自由度：
+    /// 法向平移 1 + 法向转动 2）。平面几何在各自**体坐标系**内给出。
+    Mate {
+        a: EntityId,
+        b: EntityId,
+        /// a 体上的贴合面（体坐标系）。
+        a_plane: Plane3,
+        /// b 体上的贴合面（体坐标系）。
+        b_plane: Plane3,
+    },
+    /// 3D 装配：同轴——两轴共线且同向（消 4 个自由度：横向平移 2 + 偏轴转动 2；
+    /// 沿轴滑动与绕轴转动仍自由）。轴几何在各自**体坐标系**内给出。
+    Coaxial {
+        a: EntityId,
+        b: EntityId,
+        /// a 体上的轴（体坐标系）。
+        a_axis: Axis3,
+        /// b 体上的轴（体坐标系）。
+        b_axis: Axis3,
+    },
 }
 
 impl ConstraintKind {

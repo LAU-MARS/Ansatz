@@ -27,8 +27,19 @@ use alloc::vec::Vec;
 ///
 /// - `Ok(report)`：求解层结论（含 `Inconsistent` 等失败结局 + 完整诊断）。
 /// - `Err(error)`：工具级错误（模型无效 / 能力未实现），不是求解失败。
+///
+/// 路径分发：模型含 rigid3 实体 → [`crate::assembly`]（3D 装配，LM 数值求解）；
+/// 纯 2D 模型 → 本模块的闭式解路径（位级契约由 tests/parity 冻结，保持不变）。
 pub fn solve(model: &Model) -> Result<SolveReport, SolveError> {
     validate(model)?;
+
+    if model
+        .entities
+        .iter()
+        .any(|e| matches!(e.geometry, Geometry::Rigid3 { .. }))
+    {
+        return crate::assembly::solve(model);
+    }
 
     // 1. 收集受支持的约束：Point2 到原点的距离，按目标点分组。
     let mut groups: BTreeMap<EntityId, Vec<(u32, f64)>> = BTreeMap::new();

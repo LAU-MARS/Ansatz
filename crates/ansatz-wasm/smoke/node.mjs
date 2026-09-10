@@ -48,9 +48,18 @@ for (const name of ['case1', 'case2']) {
   for (let i = 0; i < expected.entities.length; i++) {
     const g = report.entities[i].geometry;
     const w = expected.entities[i];
-    assert.equal(g.type, 'point2');
-    assert.equal(bitsOf(g.x), parseHex(w.x), `${name}.x: ${hexOf(g.x)} != ${w.x}`);
-    assert.equal(bitsOf(g.y), parseHex(w.y), `${name}.y: ${hexOf(g.y)} != ${w.y}`);
+    if (g.type === 'point2') {
+      assert.equal(bitsOf(g.x), parseHex(w.x), `${name}.x: ${hexOf(g.x)} != ${w.x}`);
+      assert.equal(bitsOf(g.y), parseHex(w.y), `${name}.y: ${hexOf(g.y)} != ${w.y}`);
+    } else if (g.type === 'rigid3') {
+      const t = g.pose.translation, rv = g.pose.rotation.vector;
+      const fields = [['tx', t.x], ['ty', t.y], ['tz', t.z], ['rx', rv[0]], ['ry', rv[1]], ['rz', rv[2]]];
+      for (const [f, val] of fields) {
+        assert.equal(bitsOf(val), parseHex(w.pose[f]), `${name}.${f}: ${hexOf(val)} != ${w.pose[f]}`);
+      }
+    } else {
+      assert.fail(`未支持的 parity 实体类型 ${g.type}`);
+    }
   }
   const diag = report.diagnostics;
   assert.equal(diag.dof_total, expected.dof_total);

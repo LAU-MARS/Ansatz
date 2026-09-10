@@ -80,10 +80,23 @@ for (const name of ['case1', 'case2']) {
   assert.equal(envelope.ok, true, `${name}: envelope.ok`);
   assert.equal(envelope.result.outcome, expected.outcome);
 
-  // 位级断言（与 Rust/wasm 测试同一份期望文件）
-  const g = envelope.result.entities[0].geometry;
-  assert.equal(bitsOf(g.x), parseHex(expected.entities[0].x), `${name}.x`);
-  assert.equal(bitsOf(g.y), parseHex(expected.entities[0].y), `${name}.y`);
+  // 位级断言（与 Rust/wasm 测试同一份期望文件）：按实体类型分派
+  for (let i = 0; i < expected.entities.length; i++) {
+    const g = envelope.result.entities[i].geometry;
+    const w = expected.entities[i];
+    if (g.type === 'point2') {
+      assert.equal(bitsOf(g.x), parseHex(w.x), `${name}.x`);
+      assert.equal(bitsOf(g.y), parseHex(w.y), `${name}.y`);
+    } else if (g.type === 'rigid3') {
+      const t = g.pose.translation, rv = g.pose.rotation.vector;
+      const fields = [['tx', t.x], ['ty', t.y], ['tz', t.z], ['rx', rv[0]], ['ry', rv[1]], ['rz', rv[2]]];
+      for (const [f, val] of fields) {
+        assert.equal(bitsOf(val), parseHex(w.pose[f]), `${name}.${f}`);
+      }
+    } else {
+      assert.fail(`未支持的 parity 实体类型 ${g.type}`);
+    }
+  }
   const diag = envelope.result.diagnostics;
   assert.equal(bitsOf(Math.abs(diag.max_residual.residual)), parseHex(expected.max_residual_abs));
   assert.equal(
@@ -91,10 +104,14 @@ for (const name of ['case1', 'case2']) {
     parseHex(expected.jacobian_condition_estimate)
   );
 
-  // 结构化 API 与字符串 API 一致
+  // 结构化 API 与字符串 API 一致（首个实体的首个数值字段）
   const structured = native.solve(model);
   assert.equal(structured.ok, true);
-  assert.equal(bitsOf(structured.result.entities[0].geometry.x), parseHex(expected.entities[0].x));
+  const sg = structured.result.entities[0].geometry;
+  const firstNum = sg.type === 'point2' ? sg.x : sg.pose.translation.x;
+  const wg = expected.entities[0];
+  const wantFirst = wg.x ?? wg.pose.tx;
+  assert.equal(bitsOf(firstNum), parseHex(wantFirst));
   console.log(`${name}: 位级一致`);
 }
 

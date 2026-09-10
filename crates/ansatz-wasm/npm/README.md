@@ -53,12 +53,36 @@ are included at `ansatz-wasm/types/ansatz.d.ts`.
 
 ## Current stage
 
-Stage-0 skeleton: the solver implements one trivial case (a 2D point + a
-distance-to-origin constraint, closed form) and rejects other constraint kinds
-with a precise `unsupported_constraint` tool error. The contract (JSON schema,
-diagnostics structure, envelope) is finished — see
-[`schema/`](https://github.com/LAU-MARS/Ansatz/tree/main/schema) — and the
-general numerical core arrives in later stages without API changes.
+3D assembly constraints are implemented and solvable: `mate` (planar contact),
+`coaxial`, `distance`, `angle`, and `fixed` on 6-DOF rigid bodies
+(`rigid3` entities), solved by Levenberg–Marquardt with analytic SO(3)
+Jacobians and full diagnostics (DOF / redundancy groups / residuals /
+suggestions). General 2D sketch constraints (coincident/parallel/tangent...)
+are not yet implemented and return a precise `unsupported_constraint` tool
+error. The JSON contract is frozen in
+[`schema/`](https://github.com/LAU-MARS/Ansatz/tree/main/schema).
+
+Example — fully constrain a body onto a base (converges, 0 DOF remaining):
+
+```js
+solve({
+  entities: [
+    { id: 1, geometry: { type: 'rigid3', pose: { translation: { x: 0, y: 0, z: 0 }, rotation: { vector: [0, 0, 0] } } } },
+    { id: 2, geometry: { type: 'rigid3', pose: { translation: { x: 0.5, y: 0.3, z: 1.2 }, rotation: { vector: [0.1, -0.2, 0.15] } } } },
+  ],
+  constraints: [
+    { id: 90, kind: { type: 'fixed', a: 1 } },
+    { id: 1, kind: { type: 'coaxial', a: 1, b: 2,
+        a_axis: { origin: { x: 0, y: 0, z: 0 }, direction: { x: 0, y: 0, z: 1 } },
+        b_axis: { origin: { x: 0.1, y: 0.2, z: 0.3 }, direction: { x: 0.1, y: 0.2, z: 1 } } } },
+    { id: 2, kind: { type: 'distance', a: 2, b: 1, value: 2.0 } },
+    { id: 3, kind: { type: 'angle', a: 1, b: 2, value: 1.5707963267948966,
+        a_dir: { x: 1, y: 0, z: 0 }, b_dir: { x: 0, y: 1, z: 0 } } },
+  ],
+})
+// -> { ok: true, result: { outcome: 'converged', entities: [...],
+//      diagnostics: { dof_remaining: 0, ... } } }
+```
 
 ## Numerical reproducibility
 

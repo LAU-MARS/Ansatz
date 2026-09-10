@@ -1,0 +1,8 @@
+{
+  "description": "单 mate：消 3 DOF（法向偏移 1 + 姿态 2），绕两轴转动与面内滑动仍自由",
+  "outcome": "underconstrained",
+  "dof_total": 12,
+  "dof_remaining": 3,
+  "redundant_constraint_ids": [],
+  "suggestion_actions": ["add_constraint:3"]
+}

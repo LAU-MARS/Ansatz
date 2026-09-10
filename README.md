@@ -11,9 +11,19 @@ A portable geometric constraint solver for 2D sketches and 3D assemblies. One Ru
 
 **Structured diagnostics are a first-class citizen**: the solver never just says "failed" — it reports degrees of freedom, redundant/conflicting constraint groups, per-constraint residuals, machine-readable suggestions, and a `human_message` on every diagnostic entry, written for humans *and* LLMs.
 
-## Current stage: skeleton (full pipeline, placeholder algorithm)
+## Current stage: 3D assembly constraints implemented
 
-⚠️ This repository is at **stage 0: skeleton & platform feasibility**. `ansatz-core::solve` implements exactly one trivial case (**a 2D point + a distance-to-origin constraint**, closed form `p' = p·(d/‖p‖)`); every other constraint kind returns an `unsupported_constraint` tool error. The data model, diagnostics, all four shells, schema contracts and CI (including the bit-level parity test framework) are real and verified. The general numerical solver (Newton/LM, sparse Jacobian, rank analysis) comes in later stages and will only replace `ansatz-core/src/solver.rs`.
+✅ **3D assembly constraints (6-DOF rigid bodies) are solvable**: mate (planar
+contact), coaxial, distance, angle, and fixed. The numerical core is
+Levenberg–Marquardt over the exponential-map parameterization with analytic
+SO(3) Jacobians (cross-verified against finite differences) and SVD rank
+analysis for DOF/redundancy/condition diagnostics. A fully-constrained assembly
+converges in ~4 iterations to ~1e-13 residual, and the **iterated solution is
+bit-identical across platforms** (parity case3).
+
+⚠️ Not yet implemented: general 2D sketch constraints (coincident/parallel/
+tangent etc. still return `unsupported_constraint` for non-rigid3 entities).
+The stage-0 2D point-distance closed-form path is preserved bit-for-bit.
 
 ## Architecture
 
@@ -118,13 +128,13 @@ Rotation uses the **exponential map (rotation vector)**, not quaternions: a mini
 
 ## Roadmap
 
-1. **Stage 0 (this repo)** — skeleton: pipeline, diagnostics framework, contracts, CI, parity infrastructure
-2. Stage 1 — general numerical core (damped Newton / Levenberg–Marquardt + sparse Jacobian)
-3. Stage 2 — real rank analysis (DOF / redundancy / conflicts, beyond counting heuristics)
-4. Stage 3 — full 2D sketch constraint set → 3D assembly (mate / coaxial / distance / angle)
+1. ~~Stage 0 — skeleton: pipeline, diagnostics, contracts, CI, parity infra~~ ✅
+2. ~~Stage 1 — general numerical core (LM + analytic Jacobians)~~ ✅ (3D path; hand-rolled dense linear algebra)
+3. ~~Stage 2 — real rank analysis~~ ✅ (SVD rank + greedy redundancy; provable conflict shortcuts)
+4. Stage 3 (in progress) — 3D assembly (mate/coaxial/distance/angle/fixed) ✅ → full 2D sketch set (todo)
 5. Stage 4 — HarmonyOS NAPI deliverable (ansatz-ffi + OHOS NDK)
 
-Parallel track (evolve/): A manual proposals (done) → B automated loop → C LLM proposer → D corpus co-evolution (RSI).
+Parallel track (evolve/): A manual proposals (done) → B automated loop → C LLM proposer → D corpus co-evolution (RSI). The golden corpus now carries three 3D cases (including bit patterns of an LM solution).
 
 ## Acknowledgements
 

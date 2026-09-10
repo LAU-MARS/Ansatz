@@ -50,10 +50,24 @@ pub struct Expected {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExpectedEntity {
     pub id: u32,
+    /// point2 终态位模式（"0x…"）。
     #[serde(default)]
     pub x: Option<String>,
     #[serde(default)]
     pub y: Option<String>,
+    /// rigid3 终态位模式（平移 3 + 旋转向量 3）。
+    #[serde(default)]
+    pub pose: Option<ExpectedPose>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExpectedPose {
+    pub tx: String,
+    pub ty: String,
+    pub tz: String,
+    pub rx: String,
+    pub ry: String,
+    pub rz: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -378,29 +392,48 @@ fn check(
             failures.push(format!("报告中找不到实体 id={}", ent.id));
             continue;
         };
-        for (axis, want_hex) in [("x", &ent.x), ("y", &ent.y)] {
-            let Some(want_hex) = want_hex else { continue };
-            let geometry = &found["geometry"];
-            if geometry["type"].as_str() != Some("point2") {
-                failures.push(format!(
-                    "实体 {} 期望 point2，实际 `{}`",
-                    ent.id,
-                    geometry["type"].as_str().unwrap_or("<非字符串>")
-                ));
-                continue;
+        let geometry = &found["geometry"];
+        match geometry["type"].as_str() {
+            Some("point2") => {
+                for (axis, want_hex) in [("x", &ent.x), ("y", &ent.y)] {
+                    let Some(want_hex) = want_hex else { continue };
+                    let Some(got) = geometry[axis].as_f64() else {
+                        failures.push(format!("实体 {} 的 {axis} 不是数值", ent.id));
+                        continue;
+                    };
+                    check_bits(ent.id, axis, got, want_hex, failures);
+                }
             }
-            let Some(got) = geometry[axis].as_f64() else {
-                failures.push(format!("实体 {} 的 {axis} 不是数值", ent.id));
-                continue;
-            };
-            let want = hex_to_f64(want_hex);
-            if got.to_bits() != want.to_bits() {
-                failures.push(format!(
-                    "实体 {} 的 {axis} 位模式不符：期望 {want_hex}（{want}），实际 {:#018x}（{got}）",
-                    ent.id,
-                    got.to_bits()
-                ));
+            Some("rigid3") => {
+                let Some(want_pose) = &ent.pose else {
+                    failures.push(format!(
+                        "实体 {} 是 rigid3 但期望文件缺 pose 六元组",
+                        ent.id
+                    ));
+                    continue;
+                };
+                let pose = &geometry["pose"];
+                let fields = [
+                    ("tx", pose["translation"]["x"].as_f64(), &want_pose.tx),
+                    ("ty", pose["translation"]["y"].as_f64(), &want_pose.ty),
+                    ("tz", pose["translation"]["z"].as_f64(), &want_pose.tz),
+                    ("rx", pose["rotation"]["vector"][0].as_f64(), &want_pose.rx),
+                    ("ry", pose["rotation"]["vector"][1].as_f64(), &want_pose.ry),
+                    ("rz", pose["rotation"]["vector"][2].as_f64(), &want_pose.rz),
+                ];
+                for (field, got, want_hex) in fields {
+                    let Some(got) = got else {
+                        failures.push(format!("实体 {} 的 {field} 不是数值", ent.id));
+                        continue;
+                    };
+                    check_bits(ent.id, field, got, want_hex, failures);
+                }
             }
+            other => failures.push(format!(
+                "实体 {} 期望 point2/rigid3，实际 `{}`",
+                ent.id,
+                other.unwrap_or("<非字符串>")
+            )),
         }
     }
     // 冗余/冲突组：集合相等（多报漏报都算行为变化）
@@ -458,6 +491,18 @@ fn check(
                 failures.push(format!("期望出现建议动作 `{want}`，实际建议 {actual:?}"));
             }
         }
+    }
+}
+
+/// 位模式断言：期望十六进制 vs 实际 f64 的 to_bits。
+fn check_bits(entity_id: u32, field: &str, got: f64, want_hex: &str, failures: &mut Vec<String>) {
+    let want = hex_to_f64(want_hex);
+    if got.to_bits() != want.to_bits() {
+        failures.push(format!(
+            "实体 {} 的 {field} 位模式不符：期望 {want_hex}（{want}），实际 {:#018x}（{got}）",
+            entity_id,
+            got.to_bits()
+        ));
     }
 }
 

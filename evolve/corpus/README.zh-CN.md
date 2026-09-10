@@ -44,3 +44,6 @@ cases/<case-id>/
 | `case-negative-distance` | Inconsistent（负距离）+ relax_constraint 建议 |
 | `case-empty-model` | Converged（exit 0）空模型 |
 | `case-unsupported-coincident` | 工具错误路径（exit 2 + unsupported_constraint） |
+| `case-3d-shaft-converged` | 3D 全约束装配（fixed + coaxial + distance + angle）；**LM 迭代解位模式** |
+| `case-3d-mate-underconstrained` | 单 mate 消 3 DOF |
+| `case-3d-conflict-distances` | 刚体距离对冲突（可证明不一致） |
