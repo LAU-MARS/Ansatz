@@ -51,6 +51,23 @@ echo '{"entities":[{"id":1,"geometry":{"type":"point2","x":3.0,"y":4.0}}],
 
 CLI exit codes: `0` converged · `1` solve-level failure (full diagnostics still on **stdout**) · `2` tool error (JSON error on **stderr**). "Solver says no" and "tool is broken" are never conflated.
 
+## npm package (ansatz-wasm)
+
+The wasm shell ships as an npm package (wasm-pack `--target nodejs`; single-threaded, no SAB/COOP-COEP):
+
+```bash
+npm install ansatz-wasm
+```
+
+```js
+const { solve, solveJson, version } = require('ansatz-wasm')
+// ESM works too: import { solve } from 'ansatz-wasm'
+
+const env = solve(model)   // { ok, result | error } — never throws
+```
+
+The package bundles the handwritten model types at `types/ansatz.d.ts` (`AnsatzModel` / `SolveReport` / `Diagnostics`, mirroring the schema contracts). Publishing: push a `v*` tag to trigger [npm-publish.yml](.github/workflows/npm-publish.yml) — CI builds and polishes the package (`scripts/npm-prepare.mjs`; the tag must equal the version), and **publishes only after the wasm bit-parity smoke passes**. Local rehearsal: `node scripts/npm-prepare.mjs && npm pack`.
+
 ## Shells
 
 - **ffi** — stable C ABI: `ansatz_solve_json(const char*) -> char*` + `ansatz_string_free` + `ansatz_version`. Header `crates/ansatz-ffi/include/ansatz.h` is cbindgen-generated and committed. Every `extern "C"` function is wrapped in `catch_unwind`; panics never cross the FFI boundary.

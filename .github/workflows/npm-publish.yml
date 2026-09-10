@@ -1,0 +1,49 @@
+# npm 包发布（ansatz-wasm，wasm-pack nodejs target）。
+#
+# 触发：推送 v* 标签（如 v0.1.0）。标签必须与 Cargo workspace 版本一致
+# （scripts/npm-prepare.mjs --check 强制），防止发错版本。
+# 也支持 workflow_dispatch 手动重发（如 npm 侧故障中断后的补救），
+# 此时跳过标签校验、按当前 main 的版本号发布。
+#
+# 前置条件（一次性配置）：在 GitHub 仓库 Settings → Secrets → Actions
+# 添加 NPM_TOKEN（npmjs.com 的 Automation 类型访问令牌）。
+# 未配置时该 workflow 会在 publish 步骤失败，前面步骤的验证仍然有效。
+name: npm-publish
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: 安装 wasm-pack（固定版本，与 ci.yml 一致）
+        run: |
+          curl -LSs https://github.com/rustwasm/wasm-pack/releases/download/v0.13.1/wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          sudo mv wasm-pack-v0.13.1-x86_64-unknown-linux-musl/wasm-pack /usr/local/bin/
+          wasm-pack --version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - name: 构建并整理 npm 包（tag 触发时校验 tag == 版本号）
+        run: >
+          node scripts/npm-prepare.mjs
+          ${{ github.event_name == 'push' && format('--check {0}', github.ref_name) || '' }}
+      - name: 发布闸门：wasm 位级一致性 + 错误路径冒烟（不过不发）
+        run: node crates/ansatz-wasm/smoke/node.mjs
+      - name: 发布到 npm（公共包）
+        working-directory: crates/ansatz-wasm/pkg-node
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

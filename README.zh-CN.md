@@ -98,6 +98,23 @@ echo '{"entities":[{"id":1,"geometry":{"type":"point2","x":3.0,"y":4.0}}],
 | 1 | 求解层失败（inconsistent / overconstrained / underconstrained / max_iterations），完整诊断照常 | 报告 JSON → stdout |
 | 2 | 工具错误（非法 JSON / 模型无效 / 能力未实现） | 错误 JSON `{kind, message}` → stderr |
 
+## npm 安装（ansatz-wasm）
+
+wasm 壳发布为 npm 包（wasm-pack `--target nodejs`，单线程、无 SAB/COOP-COEP 依赖）：
+
+```bash
+npm install ansatz-wasm
+```
+
+```js
+const { solve, solveJson, version } = require('ansatz-wasm')
+// ESM 同样可用：import { solve } from 'ansatz-wasm'
+
+const env = solve(model)   // { ok, result | error }，永不 throw
+```
+
+包内含手写模型类型 `types/ansatz.d.ts`（`AnsatzModel` / `SolveReport` / `Diagnostics` 等，与 schema 契约一一对应）。发布流程：推送 `v*` 标签触发 [npm-publish.yml](.github/workflows/npm-publish.yml)——CI 构建并整理包（`scripts/npm-prepare.mjs`，tag 必须与版本号一致），**wasm 位级一致性冒烟通过后才发布**；本地预演用 `node scripts/npm-prepare.mjs && npm pack`。
+
 ## 各壳 API
 
 ffi（`#include "crates/ansatz-ffi/include/ansatz.h"`，随仓库提交）、wasm（`import { solve, solveJson, version }`）、node（同名同签名，可无痛切换）三者的字符串协议完全一致：
