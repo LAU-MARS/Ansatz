@@ -92,6 +92,35 @@ jobs:
           diff -u schema/model.schema.json /tmp/model.schema.json
           diff -u schema/solve-report.schema.json /tmp/solve-report.schema.json
 
+  evolve-eval:
+    # 自进化实验区（evolve/，独立 workspace）：黄金语料回归。
+    # 求解器行为的任何变化必须「有意地」同步修改语料——本 job 就是那道闸门，
+    # 同时证明 evolve 工具链本身保持可用（fmt/clippy/评测）。
+    name: evolve 黄金语料回归
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            evolve
+      - name: 构建求解器（黑盒被测对象）
+        run: cargo build --release -p ansatz-cli
+      - name: evolve workspace 质量门
+        working-directory: evolve
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+      - name: 黄金语料评测（7/7 必须全过）
+        working-directory: evolve
+        run: >
+          cargo run --release -q -p ansatz-eval
+          -- --solver ../target/release/ansatz-cli --corpus corpus/cases
+
   ohos:
     # HarmonyOS（aarch64-unknown-linux-ohos）是 tier 3 target：
     #   - rustup 不分发预编译 std，需要 nightly + `-Z build-std`（或 ohos-rs 工具链）；

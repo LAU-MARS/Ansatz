@@ -1,0 +1,11 @@
+[package]
+name = "ansatz-evolve"
+description = "自进化循环骨架：Proposer/Selector 抽象 + 谱系归档 + 手动提案模式"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ansatz-eval = { path = "../evaluator" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

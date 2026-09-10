@@ -1,0 +1,9 @@
+{
+  "description": "线性相关的重复约束：Overconstrained 但解集非空，满足解照常返回",
+  "outcome": "overconstrained",
+  "dof_total": 2,
+  "dof_remaining": 1,
+  "entities": [ { "id": 1, "x": "0x0000000000000000", "y": "0x4000000000000000" } ],
+  "redundant_constraint_ids": [[1, 2]],
+  "suggestion_actions": ["remove_constraint:2"]
+}

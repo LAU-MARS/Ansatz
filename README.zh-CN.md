@@ -52,7 +52,8 @@ ansatz/
 │   ├── ansatz-wasm/      # wasm-bindgen，产出带 .d.ts 的 npm 包；smoke/ 含 Node 脚本与单文件 HTML
 │   ├── ansatz-node/      # napi-rs，Node 原生路径
 │   └── ansatz-cli/       # stdin JSON → stdout JSON
-└── schema/               # model / solve-report 的 JSON Schema 契约（CI 校验漂移）
+├── schema/               # model / solve-report 的 JSON Schema 契约（CI 校验漂移）
+└── evolve/               # 自进化实验区（RSI 跑道）：独立 workspace，与产品隔离
 ```
 
 ## 快速开始
@@ -157,7 +158,18 @@ cargo run -p ansatz-cli -- export-schema solve-report
 
 ## CI
 
-`.github/workflows/ci.yml`：fmt / clippy `-D warnings` / test；构建矩阵 x86_64-linux、aarch64-darwin、x86_64-windows-msvc、wasm32（web + nodejs 双 target）；schema 漂移检查；以及 aarch64-unknown-linux-ohos（HarmonyOS，tier 3）的 `continue-on-error` 探路 job——tier 3 无预编译 std，需 nightly `-Z build-std`，链接需 OHOS NDK，因此只做 check 且不阻塞流水线。
+`.github/workflows/ci.yml`：fmt / clippy `-D warnings` / test；构建矩阵 x86_64-linux、aarch64-darwin、x86_64-windows-msvc、wasm32（web + nodejs 双 target）；schema 漂移检查；evolve 黄金语料回归；以及 aarch64-unknown-linux-ohos（HarmonyOS，tier 3）的 `continue-on-error` 探路 job——tier 3 无预编译 std，需 nightly `-Z build-std`，链接需 OHOS NDK，因此只做 check 且不阻塞流水线。
+
+## 自进化实验区（evolve/）
+
+[`evolve/`](evolve/README.zh-CN.md) 是独立的 cargo workspace，使命是让「改进求解器」本身成为可自动化迭代的闭环（RSI：递归自我改进）。当前为**阶段 A（手动提案模式）**，已就位并实测：
+
+- **黄金语料**（`evolve/corpus/`）：7 个 case 覆盖全部结局路径，数值断言用位模式——与产品位级一致性承诺同源；
+- **确定性评测器**（`ansatz-eval`）：候选求解器只以子进程 + 超时黑盒运行，fitness 只依赖确定性事实（首跑即捕获 `0.0×(−3.0)=−0.0` 的负零位差异）；
+- **循环骨架**（`ansatz-evolve`）：`proposals/` 投递箱 + `Proposer`/`Selector` trait（vendor 无关，为 LLM 提案者预留）+ JSONL 谱系归档；
+- 产品 CI 的 `evolve-eval` job 强制求解器对黄金语料 7/7 全过——求解器行为变化必须「有意地」同步语料。
+
+路线：A 手动提案 → B 自动 apply/build/eval 闭环 → C LLM 提案者 → D 语料共演化（改进者改进自己的考卷，闭环回流——真正跨入 RSI）。详见 `evolve/README.md`。
 
 ## 路线图
 
@@ -166,6 +178,8 @@ cargo run -p ansatz-cli -- export-schema solve-report
 3. 阶段 2：真实秩分析（DOF / 冗余 / 冲突的判定不再靠计数近似）
 4. 阶段 3：2D 草图约束全集 → 3D 装配约束（贴合/同轴/距离/角度）
 5. 阶段 4：HarmonyOS NAPI 交付物（基于 ansatz-ffi + OHOS NDK）
+
+并行轨道（evolve/）：A 手动提案（已就位）→ B 自动闭环 → C LLM 提案者 → D 语料共演化（RSI）。
 
 ## 致谢
 

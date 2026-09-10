@@ -5,3 +5,9 @@
 node_modules/
 *.node
 __pycache__/
+
+# 自进化实验区（evolve/）：独立 workspace 的构建产物与运行时产物
+/evolve/target
+/evolve/archive/lineage.jsonl
+/evolve/proposals/*.patch
+/evolve/proposals/*.json

@@ -1,0 +1,4 @@
+{
+  "description": "骨架阶段未实现的约束类型：工具错误路径（exit 2 + stderr JSON）",
+  "tool_error_kind": "unsupported_constraint"
+}

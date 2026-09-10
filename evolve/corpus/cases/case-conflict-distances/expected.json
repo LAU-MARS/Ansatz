@@ -1,0 +1,9 @@
+{
+  "description": "同一实体两个不一致的距离：Inconsistent + 冲突组 + 特解按 d_max=5（原位不动）",
+  "outcome": "inconsistent",
+  "dof_total": 2,
+  "dof_remaining": 1,
+  "entities": [ { "id": 1, "x": "0x4008000000000000", "y": "0x4010000000000000" } ],
+  "redundant_constraint_ids": [[1, 2]],
+  "suggestion_actions": ["remove_constraint:2"]
+}

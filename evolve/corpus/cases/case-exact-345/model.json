@@ -1,0 +1,8 @@
+{
+  "entities": [
+    { "id": 1, "geometry": { "type": "point2", "x": 3.0, "y": 4.0 } }
+  ],
+  "constraints": [
+    { "id": 1, "kind": { "type": "distance", "a": 1, "b": null, "value": 10.0 }, "label": "点到原点距离" }
+  ]
+}

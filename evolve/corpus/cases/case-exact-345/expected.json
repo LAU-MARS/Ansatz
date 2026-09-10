@@ -1,0 +1,9 @@
+{
+  "description": "3-4-5 缩放：闭式解 (6,8) 精确可表示，残差恰为 0",
+  "outcome": "underconstrained",
+  "dof_total": 2,
+  "dof_remaining": 1,
+  "entities": [ { "id": 1, "x": "0x4018000000000000", "y": "0x4020000000000000" } ],
+  "redundant_constraint_ids": [],
+  "suggestion_actions": ["add_constraint:1"]
+}

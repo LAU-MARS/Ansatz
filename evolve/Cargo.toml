@@ -1,0 +1,22 @@
+# evolve/ 是自进化实验区（RSI 跑道），与产品 workspace 完全隔离：
+# - 不出现在根 [workspace] members 里（根 members = crates/*），
+#   产品构建/CI/发布永远不会带上这里的依赖（未来的 LLM 客户端等）。
+# - 对求解器只做黑盒访问：通过 ansatz-cli 子进程 + 超时 + JSON 契约，
+#   演化产物绝不在本进程内执行（安全护栏第一条，见 evolve/README.md）。
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+# 数值可复现性承诺同样约束本 workspace（fitness 必须可复现）。
+[profile.release]
+codegen-units = 1
+incremental = false
+lto = "fat"
+opt-level = 3
+debug-assertions = false
+overflow-checks = false

@@ -28,6 +28,11 @@ A portable geometric constraint solver for 2D sketches and 3D assemblies. One Ru
    (HarmonyOS      (single-threaded,     (same API as    JSON + exit
     NAPI & any      no SAB/COOP-COEP)    wasm shell)      code contract
     C host)
+                        │
+                        ▼  (black-box, subprocess + timeout)
+                evolve/ —— self-improvement lab (RSI runway):
+                golden corpus · deterministic evaluator ·
+                proposer/selector/lineage skeleton
 ```
 
 Every shell does **type conversion and error mapping only — no math**. ffi / wasm / node share one envelope defined in core: `{ok:true,result} | {ok:false,error:{kind,message}}`.
@@ -52,6 +57,17 @@ CLI exit codes: `0` converged · `1` solve-level failure (full diagnostics still
 - **wasm** — `wasm-pack build --target web` and `--target nodejs` both pass, `.d.ts` generated. Single-threaded; no SharedArrayBuffer / COOP-COEP. Smoke tests: a Node script (`smoke/node.mjs`) and a fully self-contained single-file HTML (`smoke/web/index.html`, wasm inlined as base64, `initSync`, works over `file://`).
 - **node** — napi-rs; exports `solve` / `solveJson` / `version` with the same names and signatures as the wasm shell, so hosts can switch between them freely.
 - **cli** — see quick start above; `export-schema model|solve-report` regenerates the JSON contracts.
+
+## Self-improvement lab (evolve/)
+
+[`evolve/`](evolve/README.md) is a **separate cargo workspace** whose mission is to make "improving the solver" itself an automatable iterative loop (RSI: recursive self-improvement). Currently at **stage A (manual-proposal mode)**, working and verified:
+
+- **Golden corpus** (`evolve/corpus/`): 7 cases covering every outcome path; numeric assertions are bit patterns, same discipline as the product parity suite.
+- **Deterministic evaluator** (`ansatz-eval`): candidates run strictly as black-box subprocesses with timeouts; fitness depends only on deterministic facts (its very first run caught a `-0.0` bit-pattern divergence).
+- **Loop skeleton** (`ansatz-evolve`): a `proposals/` inbox, vendor-neutral `Proposer`/`Selector` traits (reserved for an LLM proposer), and an append-only JSONL lineage archive.
+- The product CI `evolve-eval` job forces 7/7 on the corpus — solver behavior changes must update the corpus deliberately.
+
+Path: A manual proposals → B automated apply/build/eval loop → C LLM proposer → D corpus co-evolution (the improver improves its own test set — the step that actually crosses into RSI). Details in `evolve/README.md`.
 
 ## Contracts
 
@@ -85,6 +101,8 @@ Rotation uses the **exponential map (rotation vector)**, not quaternions: a mini
 3. Stage 2 — real rank analysis (DOF / redundancy / conflicts, beyond counting heuristics)
 4. Stage 3 — full 2D sketch constraint set → 3D assembly (mate / coaxial / distance / angle)
 5. Stage 4 — HarmonyOS NAPI deliverable (ansatz-ffi + OHOS NDK)
+
+Parallel track (evolve/): A manual proposals (done) → B automated loop → C LLM proposer → D corpus co-evolution (RSI).
 
 ## Acknowledgements
 

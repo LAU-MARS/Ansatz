@@ -1,0 +1,9 @@
+{
+  "entities": [
+    { "id": 1, "geometry": { "type": "point2", "x": 0.0, "y": 2.0 } }
+  ],
+  "constraints": [
+    { "id": 1, "kind": { "type": "distance", "a": 1, "b": null, "value": 2.0 } },
+    { "id": 2, "kind": { "type": "distance", "a": 1, "b": null, "value": 2.0 }, "label": "重复" }
+  ]
+}

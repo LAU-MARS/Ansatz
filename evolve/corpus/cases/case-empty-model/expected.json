@@ -1,0 +1,8 @@
+{
+  "description": "空模型：唯一能到达 Converged（exit 0）的骨架算例",
+  "outcome": "converged",
+  "dof_total": 0,
+  "dof_remaining": 0,
+  "redundant_constraint_ids": [],
+  "suggestion_actions": []
+}
