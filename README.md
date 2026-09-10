@@ -2,6 +2,11 @@
 
 English | [简体中文](README.zh-CN.md)
 
+[![CI](https://github.com/LAU-MARS/Ansatz/actions/workflows/ci.yml/badge.svg)](https://github.com/LAU-MARS/Ansatz/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/ansatz-wasm?logo=npm&label=ansatz-wasm)](https://www.npmjs.com/package/ansatz-wasm)
+[![npm downloads](https://img.shields.io/npm/dm/ansatz-wasm)](https://www.npmjs.com/package/ansatz-wasm)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A portable geometric constraint solver for 2D sketches and 3D assemblies. One Rust core, native on macOS/Linux/Windows/HarmonyOS, WASM for browser and Node, JSON in/out for agents.
 
 **Structured diagnostics are a first-class citizen**: the solver never just says "failed" — it reports degrees of freedom, redundant/conflicting constraint groups, per-constraint residuals, machine-readable suggestions, and a `human_message` on every diagnostic entry, written for humans *and* LLMs.

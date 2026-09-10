@@ -1,5 +1,8 @@
 # ansatz-wasm
 
+[![CI](https://github.com/LAU-MARS/Ansatz/actions/workflows/ci.yml/badge.svg)](https://github.com/LAU-MARS/Ansatz/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/LAU-MARS/Ansatz/blob/main/LICENSE)
+
 > *Ansatz* — math term for a trial solution with undetermined parameters that
 > constraints then pin down. Exactly what a geometric constraint solver does.
 

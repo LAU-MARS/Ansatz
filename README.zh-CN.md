@@ -2,6 +2,11 @@
 
 [English](README.md) | 简体中文
 
+[![CI](https://github.com/LAU-MARS/Ansatz/actions/workflows/ci.yml/badge.svg)](https://github.com/LAU-MARS/Ansatz/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/ansatz-wasm?logo=npm&label=ansatz-wasm)](https://www.npmjs.com/package/ansatz-wasm)
+[![npm downloads](https://img.shields.io/npm/dm/ansatz-wasm)](https://www.npmjs.com/package/ansatz-wasm)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 > *Ansatz*，数学名词：先设一个带待定参数的试探解，再由约束条件把它定下来——这正是几何约束求解器做的事。
 
 一个可移植的几何约束求解器，面向 2D 草图与 3D 装配。单一 Rust 核心，原生运行于 macOS / Linux / Windows / HarmonyOS，通过 WASM 支持浏览器与 Node，以 JSON 输入输出，对 Agent 友好。

@@ -1,11 +1,13 @@
 // Node 原生壳（napi-rs）冒烟测试：定位 cargo 构建出的 cdylib，复制为 .node 加载，
 // 断言与 ansatz-wasm 壳同名同签名，并对 core tests/parity 算例做位级一致断言。
 //
-// 运行前提：cargo build --release -p ansatz-node
+// 运行前提：cargo build [--release] [-p ansatz-node] [--target <triple>]
 //   node crates/ansatz-node/smoke/native.mjs
+// 产物目录自动发现（target/release、target/<triple>/release、…/debug）；
+// 也可用 ANSATZ_LIB_DIR 显式指定。
 
 import assert from 'node:assert/strict';
-import { readFileSync, copyFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, copyFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -21,12 +23,41 @@ const libNames = {
   linux: 'libansatz_node.so',
   darwin: 'libansatz_node.dylib',
 };
-const libPath = path.join(ROOT, 'target', 'release', libNames[process.platform]);
+
+/** 定位 cdylib：显式 env > 宿主默认 > --target <triple> 目录（release 优先于 debug）。 */
+function findLib() {
+  const libName = libNames[process.platform];
+  if (process.env.ANSATZ_LIB_DIR) {
+    return path.join(process.env.ANSATZ_LIB_DIR, libName);
+  }
+  const targetDir = path.join(ROOT, 'target');
+  if (!existsSync(targetDir)) return null;
+  // '' = 宿主默认（target/release）；其余条目里，三元组目录（如
+  // x86_64-unknown-linux-gnu）是显式 --target 构建的落点。
+  // release 一律优先于 debug：避免加载陈旧的 host debug 构建造成假绿。
+  const subdirs = ['', ...readdirSync(targetDir).filter((e) => e.includes('-'))];
+  for (const profile of ['release', 'debug']) {
+    for (const sub of subdirs) {
+      const p = path.join(targetDir, sub, profile, libName);
+      if (existsSync(p)) return p;
+    }
+  }
+  return null;
+}
+
+const libPath = findLib();
+if (!libPath) {
+  console.error(
+    `找不到 ansatz-node cdylib（已搜索 target/ 及其三元组子目录）。先 cargo build -p ansatz-node，或用 ANSATZ_LIB_DIR 指定。`
+  );
+  process.exit(1);
+}
 const nodePath = path.join(os.tmpdir(), 'ansatz-node-smoke', 'ansatz.node');
 mkdirSync(path.dirname(nodePath), { recursive: true });
 copyFileSync(libPath, nodePath); // Node 的 require 只认 .node 后缀
 const require = createRequire(import.meta.url);
 const native = require(nodePath);
+console.log(`native lib: ${libPath}`);
 
 const buf = new ArrayBuffer(8);
 const f64 = new Float64Array(buf);
