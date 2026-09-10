@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Ansatz contributors"]
+rust-version = "1.78"
+
+[workspace.dependencies]
+ansatz-core = { path = "crates/ansatz-core", version = "0.1.0" }
+libm = "0.2"
+serde = { version = "1", default-features = false }
+serde_json = "1"
+schemars = "1.0"
+clap = { version = "4", features = ["derive"] }
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+napi = { version = "2", features = ["serde-json"] }
+napi-derive = "2"
+napi-build = "2"
+cbindgen = "0.28"
+
+# 数值可复现性（跨平台位级一致）是本项目的硬承诺：同一份输入在
+# x86-64 / aarch64 / wasm32 上必须产生逐位相同的 f64 输出。为此显式固定
+# release 代码生成选项，并说明理由：
+[profile.release]
+# 1) 浮点语义：不设置任何等价于 -ffast-math 的选项。Rust/LLVM 默认保持
+#    严格 IEEE 754 语义（fp-contract 关闭，不会把 a*b+c 融合成 FMA），
+#    此处显式不触碰这些开关；核心代码同时禁止手写 FMA 融合
+#    （f64::mul_add 只允许出现在明确评估过数值影响的场合）。
+# 2) 单编译单元 + 关闭增量编译：并行代码生成与增量缓存不改变数值结果，
+#    但会让「逐位可复现」无法从构建配置上审计；固定为最确定性的形态。
+codegen-units = 1
+incremental = false
+# 3) LTO：在严格 IEEE 语义下 LTO 不改变浮点结果，取 "fat" 获得稳定的
+#    最终代码形态与最优体积。
+lto = "fat"
+opt-level = 3
+# 4) panic 策略：FFI 壳依赖 catch_unwind 在 extern "C" 边界内拦截 panic
+#    （禁止 unwind 穿越 FFI），因此必须保持 unwind，禁止 abort。
+panic = "unwind"
+# 5) 下列开关在 release 下本就是默认值，显式写出以防止后续误改：
+debug-assertions = false
+overflow-checks = false

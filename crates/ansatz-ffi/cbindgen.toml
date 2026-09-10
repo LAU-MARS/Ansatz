@@ -1,0 +1,10 @@
+# cbindgen 配置：生成 include/ansatz.h（C 头文件，随仓库提交，
+# 宿主无需安装 Rust 工具链即可对接；CI 不做再生校验，改动 API 后记得重新生成）。
+language = "C"
+include_guard = "ANSATZ_H"
+autogen_warning = """
+/* 警告：本文件由 crates/ansatz-ffi 的 build.rs（cbindgen）自动生成。
+   不要手改；修改 FFI 接口后重新 `cargo build -p ansatz-ffi` 并提交。 */
+"""
+# 指针宽度按目标平台用 size_t/ptrdiff_t，保证 32/64 位宿主一致
+usize_is_size_t = true

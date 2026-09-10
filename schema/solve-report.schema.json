@@ -1,0 +1,468 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SolveReport",
+  "description": "求解报告：结局 + 求解后的实体 + 诊断。",
+  "type": "object",
+  "properties": {
+    "diagnostics": {
+      "$ref": "#/$defs/Diagnostics"
+    },
+    "entities": {
+      "description": "求解后的实体（欠约束且不允许接受特解时，原样返回输入实体）。",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Entity"
+      }
+    },
+    "outcome": {
+      "$ref": "#/$defs/SolveOutcome"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "outcome",
+    "entities",
+    "diagnostics"
+  ],
+  "$defs": {
+    "ConstraintResidual": {
+      "description": "单条约束在返回解（或特解）处的残差。",
+      "type": "object",
+      "properties": {
+        "constraint_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "human_message": {
+          "type": "string"
+        },
+        "residual": {
+          "description": "残差值（约束方程左端减右端；距离约束即 `‖p‖ − d`）。",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "constraint_id",
+        "residual",
+        "human_message"
+      ]
+    },
+    "Diagnostics": {
+      "description": "结构化诊断。",
+      "type": "object",
+      "properties": {
+        "dof_remaining": {
+          "description": "求解后剩余自由度（骨架阶段为通用计数近似，见 solver 模块注释）。",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "dof_total": {
+          "description": "模型总自由度（各实体参数数之和）。",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "jacobian_condition_estimate": {
+          "description": "雅可比条件数估计：`κ(J) = σ_max/σ_min`。\n骨架阶段对单条归一化约束行精确为 `1.0`；行退化（原点处梯度为零）\n或秩亏（重复约束）时无意义，为 `None`。通用求解器接入后替换为真实估计。",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "max_residual": {
+          "description": "残差绝对值最大的那条约束。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConstraintResidual"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "redundant_constraints": {
+          "description": "冗余/冲突约束组。",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RedundancyGroup"
+          }
+        },
+        "residuals": {
+          "description": "每条约束在返回解处的残差。",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConstraintResidual"
+          }
+        },
+        "suggestions": {
+          "description": "机器可读的修复建议。",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Suggestion"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "dof_total",
+        "dof_remaining",
+        "redundant_constraints",
+        "residuals",
+        "suggestions"
+      ]
+    },
+    "Entity": {
+      "description": "模型中的一个实体：稳定 id + 几何数据。",
+      "type": "object",
+      "properties": {
+        "geometry": {
+          "$ref": "#/$defs/Geometry"
+        },
+        "id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "geometry"
+      ]
+    },
+    "Geometry": {
+      "description": "几何实体。每个变体自带全部几何参数（骨架阶段不做参数共享/引用式建模）。",
+      "oneOf": [
+        {
+          "description": "平面上的点（2 DOF）。",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "point2"
+            },
+            "x": {
+              "type": "number",
+              "format": "double"
+            },
+            "y": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "x",
+            "y"
+          ]
+        },
+        {
+          "description": "线段，由两端点表示（4 DOF）。",
+          "type": "object",
+          "properties": {
+            "end": {
+              "$ref": "#/$defs/Point2"
+            },
+            "start": {
+              "$ref": "#/$defs/Point2"
+            },
+            "type": {
+              "type": "string",
+              "const": "line2"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "start",
+            "end"
+          ]
+        },
+        {
+          "description": "圆（3 DOF：圆心 2 + 半径 1）。",
+          "type": "object",
+          "properties": {
+            "center": {
+              "$ref": "#/$defs/Point2"
+            },
+            "radius": {
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "circle2"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "center",
+            "radius"
+          ]
+        },
+        {
+          "description": "圆弧（5 DOF：圆 3 + 起止角 2），角度为弧度。",
+          "type": "object",
+          "properties": {
+            "center": {
+              "$ref": "#/$defs/Point2"
+            },
+            "end_angle": {
+              "type": "number",
+              "format": "double"
+            },
+            "radius": {
+              "type": "number",
+              "format": "double"
+            },
+            "start_angle": {
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "arc2"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "center",
+            "radius",
+            "start_angle",
+            "end_angle"
+          ]
+        },
+        {
+          "description": "3D 刚体（6 DOF），位姿用 [`Pose3`]（平移 + 指数映射旋转）。",
+          "type": "object",
+          "properties": {
+            "pose": {
+              "$ref": "#/$defs/Pose3"
+            },
+            "type": {
+              "type": "string",
+              "const": "rigid3"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "pose"
+          ]
+        }
+      ]
+    },
+    "Point2": {
+      "description": "2D 点。",
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ]
+    },
+    "Pose3": {
+      "description": "3D 刚体位姿 = 平移 + 旋转（指数映射）。",
+      "type": "object",
+      "properties": {
+        "rotation": {
+          "$ref": "#/$defs/Rotation3"
+        },
+        "translation": {
+          "$ref": "#/$defs/Vec3"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "translation",
+        "rotation"
+      ]
+    },
+    "RedundancyGroup": {
+      "description": "约束冗余/冲突组：这些约束在当前雅可比下线性相关。\n\n- 线性相关但相互**一致** → 冗余（删除任何一条不改变解集）；\n- 线性相关且相互**矛盾** → 冲突（见 `Inconsistent` 结局）。\n\n具体是哪种情形由 `human_message` 说明。",
+      "type": "object",
+      "properties": {
+        "constraint_ids": {
+          "description": "组内互相冲突/重复的约束 id。",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "human_message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "constraint_ids",
+        "human_message"
+      ]
+    },
+    "Rotation3": {
+      "description": "3D 旋转的参数化：**指数映射（旋转向量）** `v = θ·û`。\n\n# 为什么选指数映射而不是四元数\n\n- 四元数是 4 参数表示 3 个自由度，求解时必须额外引入单位范数约束，\n  等于给系统加了一个非线性方程；且其雅可比存在冗余列，牛顿类求解器\n  的法方程矩阵 `JᵀJ` 必然奇异，需要额外的流形投影/正交化处理。\n- 指数映射是**最小参数化**（3 参数 ↔ 3 自由度）：无冗余列、无额外约束，\n  `θ → 0` 时 `v → 0` 连续，没有四元数的 ±q 双重覆盖问题，也没有\n  欧拉角的万向锁。\n\n# 切换抽象点\n\n本类型是旋转参数化的唯一入口：求解器只经由 `Rotation3`（及其未来的\n切空间/雅可比接口）访问旋转，不直接触碰内部表示。若后续需要换成\n四元数 + 流形投影等表示，只需替换本结构体与对应的导数实现，\n数据模型其余部分不动。",
+      "type": "object",
+      "properties": {
+        "vector": {
+          "description": "旋转向量：方向为旋转轴（单位化后），模长为旋转角（弧度）。",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "vector"
+      ]
+    },
+    "SolveOutcome": {
+      "description": "求解结局。这是**求解层**的结果（区别于工具层错误 [`crate::SolveError`]）。",
+      "oneOf": [
+        {
+          "description": "在容差内满足全部约束。",
+          "type": "string",
+          "const": "converged"
+        },
+        {
+          "description": "约束一致但自由度未耗尽（附特解或原样返回，取决于参数）。",
+          "type": "string",
+          "const": "underconstrained"
+        },
+        {
+          "description": "约束一致但存在冗余（线性相关），解集仍可能非空。",
+          "type": "string",
+          "const": "overconstrained"
+        },
+        {
+          "description": "约束互相冲突，无解（附冲突组与修复建议）。",
+          "type": "string",
+          "const": "inconsistent"
+        },
+        {
+          "description": "达到最大迭代数仍未收敛（骨架阶段不会出现，保留为契约的一部分）。",
+          "type": "string",
+          "const": "max_iterations"
+        }
+      ]
+    },
+    "Suggestion": {
+      "description": "一条诊断建议：机器可读动作 + 人类/LLM 可读解释。\n\nJSON 形状（flatten 拍平，便于人与 LLM 直接阅读）：\n`{\"action\":\"remove_constraint\",\"id\":5,\"human_message\":\"…\"}`。\n注意 serde 的 flatten 与 deny_unknown_fields 不兼容，故本类型不加该属性。",
+      "type": "object",
+      "properties": {
+        "human_message": {
+          "type": "string"
+        }
+      },
+      "oneOf": [
+        {
+          "description": "删除指定约束（冗余，或冲突组中的多余一方）。",
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "const": "remove_constraint"
+            },
+            "id": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "action",
+            "id"
+          ]
+        },
+        {
+          "description": "放宽指定约束（调整参数值使其与其余约束相容）。",
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "const": "relax_constraint"
+            },
+            "id": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "action",
+            "id"
+          ]
+        },
+        {
+          "description": "补充约束以消除 `dof_remaining` 个剩余自由度。",
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "const": "add_constraint"
+            },
+            "dof_remaining": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "action",
+            "dof_remaining"
+          ]
+        }
+      ],
+      "required": [
+        "human_message"
+      ]
+    },
+    "Vec3": {
+      "description": "3D 向量（平移、方向等）。",
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "type": "number",
+          "format": "double"
+        },
+        "z": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "z"
+      ]
+    }
+  }
+}

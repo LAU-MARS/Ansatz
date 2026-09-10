@@ -1,0 +1,11 @@
+{
+  "description": "期望位模式：x=y=0.7071067811865475（1/√(2) 经 sqrt+除法两次舍入），残差为 -1.11e-16（取绝对值）",
+  "outcome": "underconstrained",
+  "dof_total": 2,
+  "dof_remaining": 1,
+  "entities": [
+    { "id": 1, "x": "0x3FE6A09E667F3BCC", "y": "0x3FE6A09E667F3BCC" }
+  ],
+  "max_residual_abs": "0x3CA0000000000000",
+  "jacobian_condition_estimate": "0x3FF0000000000000"
+}

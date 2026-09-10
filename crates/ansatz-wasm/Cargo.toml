@@ -1,0 +1,24 @@
+[package]
+name = "ansatz-wasm"
+description = "Ansatz wasm-bindgen 壳：浏览器/Node 通用，单线程，不依赖 SharedArrayBuffer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# 禁用 wasm-opt（wasm-pack release 默认会联网下载 binaryen）：
+# 1. wasm 语义是固定的，优化与否不影响 f64 结果的位级一致性；
+# 2. 构建不再依赖外部二进制下载，离线/沙箱环境可复现。
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[dependencies]
+ansatz-core = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+wasm-bindgen = { workspace = true }
+serde-wasm-bindgen = { workspace = true }

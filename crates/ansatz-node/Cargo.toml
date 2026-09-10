@@ -1,0 +1,21 @@
+[package]
+name = "ansatz-node"
+description = "Ansatz napi-rs 壳：Node 原生性能路径，接口与 ansatz-wasm 同名同签名"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ansatz-core = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+napi = { workspace = true }
+napi-derive = { workspace = true }
+
+[build-dependencies]
+napi-build = { workspace = true }

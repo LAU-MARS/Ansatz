@@ -1,0 +1,19 @@
+[package]
+name = "ansatz-ffi"
+description = "Ansatz C ABI 壳（cdylib + staticlib）：供 HarmonyOS NAPI 及任意 C 宿主使用"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+ansatz-core = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[build-dependencies]
+cbindgen = { workspace = true }

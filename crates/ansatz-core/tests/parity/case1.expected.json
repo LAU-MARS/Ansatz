@@ -1,0 +1,11 @@
+{
+  "description": "期望位模式：x=6.0, y=8.0（精确），残差 0.0，条件数 1.0",
+  "outcome": "underconstrained",
+  "dof_total": 2,
+  "dof_remaining": 1,
+  "entities": [
+    { "id": 1, "x": "0x4018000000000000", "y": "0x4020000000000000" }
+  ],
+  "max_residual_abs": "0x0000000000000000",
+  "jacobian_condition_estimate": "0x3FF0000000000000"
+}

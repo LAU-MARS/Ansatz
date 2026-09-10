@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: fmt + clippy + test (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: 格式检查
+        run: cargo fmt --all -- --check
+      - name: clippy（警告即失败）
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: 测试
+        run: cargo test --workspace
+
+  native:
+    name: build + bit-parity (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest # macos-latest 运行器即 arm64，原生执行
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: 构建（全部 crate：core/ffi/wasm壳/node壳/cli）
+        run: cargo build --workspace --all-targets --target ${{ matrix.target }}
+      - name: 测试（含位级一致性断言，在每个架构上原位运行）
+        run: cargo test --workspace --target ${{ matrix.target }}
+      - name: node 原生壳冒烟
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: node crates/ansatz-node/smoke/native.mjs
+
+  wasm:
+    name: wasm32 (web + nodejs) + bit-parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: no_std 纯净性检查（core 裸构建，无 serde feature，必须可为无 std 目标编译）
+        run: cargo check -p ansatz-core --target wasm32-unknown-unknown --no-default-features
+      - name: 安装 wasm-pack（固定版本）
+        run: |
+          curl -LSs https://github.com/rustwasm/wasm-pack/releases/download/v0.13.1/wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          sudo mv wasm-pack-v0.13.1-x86_64-unknown-linux-musl/wasm-pack /usr/local/bin/
+          wasm-pack --version
+      - name: wasm-pack build --target web
+        run: wasm-pack build crates/ansatz-wasm --release --target web --out-dir pkg-web
+      - name: wasm-pack build --target nodejs
+        run: wasm-pack build crates/ansatz-wasm --release --target nodejs --out-dir pkg-node
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Node 冒烟（对 parity 期望文件做十六进制位模式断言）
+        run: node crates/ansatz-wasm/smoke/node.mjs
+
+  schema-drift:
+    name: schema 漂移检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 从 Rust 类型再生 Schema 并与已提交文件比对（漂移即失败）
+        run: |
+          cargo run -p ansatz-cli --quiet -- export-schema model > /tmp/model.schema.json
+          cargo run -p ansatz-cli --quiet -- export-schema solve-report > /tmp/solve-report.schema.json
+          diff -u schema/model.schema.json /tmp/model.schema.json
+          diff -u schema/solve-report.schema.json /tmp/solve-report.schema.json
+
+  ohos:
+    # HarmonyOS（aarch64-unknown-linux-ohos）是 tier 3 target：
+    #   - rustup 不分发预编译 std，需要 nightly + `-Z build-std`（或 ohos-rs 工具链）；
+    #   - 真正链接产物需要 OHOS NDK（clang/lld + sysroot），GitHub 托管 runner 未内置。
+    # 因此本 job 只做 `cargo check`（不需要链接器）验证「能编译到该目标」，
+    # 并标记 continue-on-error: true——tier 3 的任何工具链波动都不许阻塞流水线。
+    name: aarch64-unknown-linux-ohos (tier 3, 允许失败)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - name: check（build-std 重建 core/alloc/std；链接交给本地 OHOS NDK 环境）
+        run: >
+          cargo +nightly check -Z build-std
+          -p ansatz-ffi --target aarch64-unknown-linux-ohos

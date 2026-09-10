@@ -1,0 +1,9 @@
+{
+  "entities": [
+    { "id": 1, "geometry": { "type": "point2", "x": 1.0, "y": 1.0 } }
+  ],
+  "constraints": [
+    { "id": 1, "kind": { "type": "distance", "a": 1, "b": null, "value": 1.0 } }
+  ],
+  "params": { "tolerance": 1e-9, "max_iterations": 100, "allow_underconstrained": true }
+}

@@ -1,0 +1,620 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Model",
+  "description": "求解器输入：实体 + 约束 + 参数。",
+  "type": "object",
+  "properties": {
+    "constraints": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Constraint"
+      }
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Entity"
+      }
+    },
+    "params": {
+      "$ref": "#/$defs/SolveParams",
+      "default": {
+        "allow_underconstrained": true,
+        "max_iterations": 100,
+        "tolerance": 1e-9
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "entities",
+    "constraints"
+  ],
+  "$defs": {
+    "Constraint": {
+      "description": "模型中的一条约束：稳定 id（模型内唯一）+ 种类参数 + 可选人类标签。",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "kind": {
+          "$ref": "#/$defs/ConstraintKind"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind"
+      ]
+    },
+    "ConstraintKind": {
+      "description": "约束种类与参数。\n\n2D 草图约束与 3D 装配约束共用本枚举。骨架阶段的求解器只支持\n[`ConstraintKind::Distance`] 的 `b = None`（到原点）形式，其余类型\n会被 [`crate::solve`](crate::solver::solve) 以\n[`SolveError::UnsupportedConstraint`](crate::report::SolveError::UnsupportedConstraint)\n拒绝——这是「能力未实现」的工具级错误，不是求解失败。",
+      "oneOf": [
+        {
+          "description": "两实体重合（点-点，或点落在曲线/曲面上）。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "b": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "coincident"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a",
+            "b"
+          ]
+        },
+        {
+          "description": "三点共线（c 落在 a、b 确定的直线上）。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "b": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "c": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "collinear"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a",
+            "b",
+            "c"
+          ]
+        },
+        {
+          "description": "两直线平行。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "b": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "parallel"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a",
+            "b"
+          ]
+        },
+        {
+          "description": "两元素垂直。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "b": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "perpendicular"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a",
+            "b"
+          ]
+        },
+        {
+          "description": "相切。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "b": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "tangent"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a",
+            "b"
+          ]
+        },
+        {
+          "description": "距离。`b = None` 表示到坐标原点（**骨架阶段唯一受支持的算例**）。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "b": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "distance"
+            },
+            "value": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a",
+            "value"
+          ]
+        },
+        {
+          "description": "角度（弧度）。`b = None` 表示相对参考系。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "b": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "angle"
+            },
+            "value": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a",
+            "value"
+          ]
+        },
+        {
+          "description": "a 与 b 关于 about（点/线/面）对称。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "about": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "b": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "symmetric"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a",
+            "b",
+            "about"
+          ]
+        },
+        {
+          "description": "固定 a 的当前位形（不参与求解）。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "fixed"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a"
+          ]
+        },
+        {
+          "description": "3D 装配：两面贴合（法向相反、面上重合，6-DOF 刚体配合）。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "b": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "mate"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a",
+            "b"
+          ]
+        },
+        {
+          "description": "3D 装配：同轴。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "b": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "coaxial"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a",
+            "b"
+          ]
+        }
+      ]
+    },
+    "Entity": {
+      "description": "模型中的一个实体：稳定 id + 几何数据。",
+      "type": "object",
+      "properties": {
+        "geometry": {
+          "$ref": "#/$defs/Geometry"
+        },
+        "id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "geometry"
+      ]
+    },
+    "Geometry": {
+      "description": "几何实体。每个变体自带全部几何参数（骨架阶段不做参数共享/引用式建模）。",
+      "oneOf": [
+        {
+          "description": "平面上的点（2 DOF）。",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "point2"
+            },
+            "x": {
+              "type": "number",
+              "format": "double"
+            },
+            "y": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "x",
+            "y"
+          ]
+        },
+        {
+          "description": "线段，由两端点表示（4 DOF）。",
+          "type": "object",
+          "properties": {
+            "end": {
+              "$ref": "#/$defs/Point2"
+            },
+            "start": {
+              "$ref": "#/$defs/Point2"
+            },
+            "type": {
+              "type": "string",
+              "const": "line2"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "start",
+            "end"
+          ]
+        },
+        {
+          "description": "圆（3 DOF：圆心 2 + 半径 1）。",
+          "type": "object",
+          "properties": {
+            "center": {
+              "$ref": "#/$defs/Point2"
+            },
+            "radius": {
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "circle2"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "center",
+            "radius"
+          ]
+        },
+        {
+          "description": "圆弧（5 DOF：圆 3 + 起止角 2），角度为弧度。",
+          "type": "object",
+          "properties": {
+            "center": {
+              "$ref": "#/$defs/Point2"
+            },
+            "end_angle": {
+              "type": "number",
+              "format": "double"
+            },
+            "radius": {
+              "type": "number",
+              "format": "double"
+            },
+            "start_angle": {
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "arc2"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "center",
+            "radius",
+            "start_angle",
+            "end_angle"
+          ]
+        },
+        {
+          "description": "3D 刚体（6 DOF），位姿用 [`Pose3`]（平移 + 指数映射旋转）。",
+          "type": "object",
+          "properties": {
+            "pose": {
+              "$ref": "#/$defs/Pose3"
+            },
+            "type": {
+              "type": "string",
+              "const": "rigid3"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "pose"
+          ]
+        }
+      ]
+    },
+    "Point2": {
+      "description": "2D 点。",
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ]
+    },
+    "Pose3": {
+      "description": "3D 刚体位姿 = 平移 + 旋转（指数映射）。",
+      "type": "object",
+      "properties": {
+        "rotation": {
+          "$ref": "#/$defs/Rotation3"
+        },
+        "translation": {
+          "$ref": "#/$defs/Vec3"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "translation",
+        "rotation"
+      ]
+    },
+    "Rotation3": {
+      "description": "3D 旋转的参数化：**指数映射（旋转向量）** `v = θ·û`。\n\n# 为什么选指数映射而不是四元数\n\n- 四元数是 4 参数表示 3 个自由度，求解时必须额外引入单位范数约束，\n  等于给系统加了一个非线性方程；且其雅可比存在冗余列，牛顿类求解器\n  的法方程矩阵 `JᵀJ` 必然奇异，需要额外的流形投影/正交化处理。\n- 指数映射是**最小参数化**（3 参数 ↔ 3 自由度）：无冗余列、无额外约束，\n  `θ → 0` 时 `v → 0` 连续，没有四元数的 ±q 双重覆盖问题，也没有\n  欧拉角的万向锁。\n\n# 切换抽象点\n\n本类型是旋转参数化的唯一入口：求解器只经由 `Rotation3`（及其未来的\n切空间/雅可比接口）访问旋转，不直接触碰内部表示。若后续需要换成\n四元数 + 流形投影等表示，只需替换本结构体与对应的导数实现，\n数据模型其余部分不动。",
+      "type": "object",
+      "properties": {
+        "vector": {
+          "description": "旋转向量：方向为旋转轴（单位化后），模长为旋转角（弧度）。",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "vector"
+      ]
+    },
+    "SolveParams": {
+      "description": "求解参数。",
+      "type": "object",
+      "properties": {
+        "allow_underconstrained": {
+          "description": "是否接受欠约束解：为 `true` 时报告 `Underconstrained` 并附特解；\n为 `false` 时同样报告 `Underconstrained`，但实体原样返回输入。",
+          "type": "boolean",
+          "default": true
+        },
+        "max_iterations": {
+          "description": "最大迭代数（骨架阶段闭式解不迭代，字段保留为契约的一部分）。",
+          "type": "integer",
+          "format": "uint32",
+          "default": 100,
+          "minimum": 0
+        },
+        "tolerance": {
+          "description": "绝对容差：同时用作残差收敛判据与「距离值是否一致」的冲突判据。",
+          "type": "number",
+          "format": "double",
+          "default": 1e-9
+        }
+      },
+      "additionalProperties": false
+    },
+    "Vec3": {
+      "description": "3D 向量（平移、方向等）。",
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "type": "number",
+          "format": "double"
+        },
+        "z": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "z"
+      ]
+    }
+  }
+}

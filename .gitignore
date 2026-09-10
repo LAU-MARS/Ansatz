@@ -1,0 +1,7 @@
+/target
+**/pkg
+**/pkg-web
+**/pkg-node
+node_modules/
+*.node
+__pycache__/
