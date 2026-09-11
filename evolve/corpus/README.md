@@ -53,3 +53,4 @@ cases/<case-id>/
 | `case-3d-shaft-converged` | 3D fully-constrained assembly (fixed + coaxial + distance + angle); **LM solution bit patterns** |
 | `case-3d-mate-underconstrained` | single mate removes 3 of 6 DOF |
 | `case-3d-conflict-distances` | provably inconsistent distance pair on rigid bodies |
+| `case-3d-driven-arm` | three-link arm: fixed + 3 revolutes (2 driven) + transmission coupling; **joint-space drive bit patterns** |

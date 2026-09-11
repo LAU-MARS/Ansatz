@@ -1,0 +1,14 @@
+{
+  "description": "三连杆机械臂：fixed + revolute×3（驱动×2）+ 传动耦合——关节空间驱动的位级基准",
+  "outcome": "converged",
+  "dof_total": 24,
+  "dof_remaining": 0,
+  "entities": [
+    { "id": 1, "pose": { "tx": "0x0000000000000000", "ty": "0x0000000000000000", "tz": "0x0000000000000000", "rx": "0x0000000000000000", "ry": "0x0000000000000000", "rz": "0x0000000000000000" } },
+    { "id": 2, "pose": { "tx": "0x3DD815338F719C00", "ty": "0x3DBB1CA0E4763000", "tz": "0xBDC5B07876BE5800", "rx": "0x3DBC0A5A79C79000", "ry": "0x3DDB69A494A45000", "rz": "0x3FDCD1B1DE8BFFED" } },
+    { "id": 3, "pose": { "tx": "0x3DEBFEF04EEF2400", "ty": "0x3DC7F7F8DD81E800", "tz": "0x3FD999999985A387", "rx": "0x3DCA1989BFFBA000", "ry": "0x3DE5849CF0EE5000", "rz": "0x3FDCFDC3D49BB0C0" } },
+    { "id": 4, "pose": { "tx": "0x3DF5A2F899F62400", "ty": "0x3DCBE60D9CEF5000", "tz": "0x3FE99999998CB126", "rx": "0x3DD3432A3E16B000", "ry": "0x3DE7F54503CC8000", "rz": "0x3FE1DB12D6F3AD22" } }
+  ],
+  "max_residual_abs": "0x3DDC0C250DA860F4",
+  "jacobian_condition_estimate": "0x4015C8E85C30DA21"
+}

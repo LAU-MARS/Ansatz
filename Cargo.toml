@@ -3,15 +3,19 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 authors = ["Ansatz contributors"]
 rust-version = "1.78"
 
 [workspace.dependencies]
-ansatz-core = { path = "crates/ansatz-core", version = "0.2.0" }
+ansatz-core = { path = "crates/ansatz-core", version = "0.3.0" }
 libm = "0.2"
+# nalgebra：纯 Rust 线性代数（无 BLAS/平台分发），no_std 经 libm feature，
+# 跨平台位级一致的前提全部满足。core 只用它的静态 3×3 与 SVD，
+# 分解结果的施加仍走自有定序循环（见 linalg 模块注释）。
+nalgebra = { version = "0.33", default-features = false }
 serde = { version = "1", default-features = false }
 # float_roundtrip：保证 f64 解析逐位精确（serde_json 默认的快速路径对某些
 # 17 位小数会差 1 ULP——evolve 黄金语料实测咬到过：求解器位级稳定的输出

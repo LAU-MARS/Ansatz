@@ -142,3 +142,17 @@ fn parity_case3_rigid3_lm_solution() {
     let got = run_case("case3");
     assert_eq!(got["outcome"], "converged");
 }
+
+#[test]
+fn parity_case4_driven_arm_with_transmission() {
+    // 三连杆机械臂（双驱动 + 传动耦合）：关节空间驱动的逐位基准，
+    // 覆盖 revolute/drive/transmission 的迭代路径。
+    let got = run_case("case4");
+    assert_eq!(got["outcome"], "converged");
+    let j1 = &got["diagnostics"]["joints"];
+    assert_eq!(
+        j1.as_array().map(|a| a.len()),
+        Some(3),
+        "三个关节各报一条状态"
+    );
+}

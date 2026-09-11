@@ -74,6 +74,13 @@
           ],
           "format": "double"
         },
+        "joints": {
+          "description": "关节变量状态（revolute/cylindrical/prismatic 各报一条）。",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JointState"
+          }
+        },
         "max_residual": {
           "description": "残差绝对值最大的那条约束。",
           "anyOf": [
@@ -113,7 +120,8 @@
         "dof_remaining",
         "redundant_constraints",
         "residuals",
-        "suggestions"
+        "suggestions",
+        "joints"
       ]
     },
     "Entity": {
@@ -258,6 +266,37 @@
             "pose"
           ]
         }
+      ]
+    },
+    "JointState": {
+      "description": "关节变量的当前值（按关节约束逐个报告，机器人学的一等公民）。\n\nrevolute/cylindrical：绕轴相对转角 θ（弧度，初始位形为 0）；\nprismatic：沿轴相对位移 δ（长度，初始位形为 0）。\n`drive` 施加后收敛报告中该值即驱动目标。",
+      "type": "object",
+      "properties": {
+        "constraint_id": {
+          "description": "对应的关节约束 id。",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "human_message": {
+          "type": "string"
+        },
+        "joint_kind": {
+          "description": "\"revolute\" | \"cylindrical\" | \"prismatic\"",
+          "type": "string"
+        },
+        "value": {
+          "description": "当前关节变量（弧度或长度，以初始位形为零点）。",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "constraint_id",
+        "joint_kind",
+        "value",
+        "human_message"
       ]
     },
     "Point2": {

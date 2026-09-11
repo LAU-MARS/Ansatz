@@ -54,13 +54,17 @@ are included at `ansatz-wasm/types/ansatz.d.ts`.
 ## Current stage
 
 3D assembly constraints are implemented and solvable: `mate` (planar contact),
-`coaxial`, `distance`, `angle`, and `fixed` on 6-DOF rigid bodies
-(`rigid3` entities), solved by Levenberg–Marquardt with analytic SO(3)
-Jacobians and full diagnostics (DOF / redundancy groups / residuals /
-suggestions). General 2D sketch constraints (coincident/parallel/tangent...)
-are not yet implemented and return a precise `unsupported_constraint` tool
-error. The JSON contract is frozen in
-[`schema/`](https://github.com/LAU-MARS/Ansatz/tree/main/schema).
+`coaxial`, anchored `distance`, `angle`, and `fixed` on 6-DOF rigid bodies
+(`rigid3` entities) — **plus robotics primitives**: the joint family
+(`revolute` / `cylindrical` / `prismatic` / `spherical`), joint **drives**
+(`drive` field, initial assembly as the zero point), per-joint state
+diagnostics (`diagnostics.joints`), and **transmission coupling** between two
+revolute joints (gear ratios; external meshing is negative). Solved by
+Levenberg–Marquardt with analytic SO(3) Jacobians and full diagnostics
+(DOF / redundancy groups / residuals / suggestions). General 2D sketch
+constraints (coincident/parallel/tangent...) are not yet implemented and
+return a precise `unsupported_constraint` tool error. The JSON contract is
+frozen in [`schema/`](https://github.com/LAU-MARS/Ansatz/tree/main/schema).
 
 Example — fully constrain a body onto a base (converges, 0 DOF remaining):
 

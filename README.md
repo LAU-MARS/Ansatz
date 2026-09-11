@@ -11,19 +11,33 @@ A portable geometric constraint solver for 2D sketches and 3D assemblies. One Ru
 
 **Structured diagnostics are a first-class citizen**: the solver never just says "failed" — it reports degrees of freedom, redundant/conflicting constraint groups, per-constraint residuals, machine-readable suggestions, and a `human_message` on every diagnostic entry, written for humans *and* LLMs.
 
-## Current stage: 3D assembly constraints implemented
+## Current stage: 3D assembly + robotics primitives implemented
 
-✅ **3D assembly constraints (6-DOF rigid bodies) are solvable**: mate (planar
-contact), coaxial, distance, angle, and fixed. The numerical core is
-Levenberg–Marquardt over the exponential-map parameterization with analytic
-SO(3) Jacobians (cross-verified against finite differences) and SVD rank
-analysis for DOF/redundancy/condition diagnostics. A fully-constrained assembly
-converges in ~4 iterations to ~1e-13 residual, and the **iterated solution is
-bit-identical across platforms** (parity case3).
+✅ **3D assembly constraints (6-DOF rigid bodies)**: mate (planar contact),
+coaxial, distance (**anchored**), angle, and fixed.
 
-⚠️ Not yet implemented: general 2D sketch constraints (coincident/parallel/
-tangent etc. still return `unsupported_constraint` for non-rigid3 entities).
-The stage-0 2D point-distance closed-form path is preserved bit-for-bit.
+✅ **Robotics primitives**:
+- **Joint family** (first-class, diagnosed per joint): revolute (removes 5,
+  leaves 1), cylindrical (4/2), prismatic (with roll lock, 5/1), spherical (3/3)
+- **Joint drive**: the `drive` field drives the joint variable from the initial
+  assembly as zero (radians for revolute, displacement for prismatic); the
+  mechanism becomes fully determined
+- **Joint-state diagnostics**: `diagnostics.joints` reports each joint variable
+- **Transmission coupling**: the `transmission` constraint couples two revolute
+  joints by ratio (gears/belts; external meshing is a negative ratio)
+
+Numerical core: Levenberg–Marquardt (SVD-damped pseudo-inverse step) over the
+exponential map with analytic Jacobians (FD cross-verified per constraint
+family) and SVD rank analysis. Linear algebra stands on **nalgebra** (pure
+Rust, no BLAS, no_std); the application order and convergence semantics are our
+own. Measured: fully-constrained assemblies converge in ~4 iterations to ~1e-13;
+a three-link arm with two drives + transmission converges with the ratio held
+exactly; **iterated solutions are bit-identical across platforms** (parity
+cases 3/4 frozen).
+
+⚠️ Not yet implemented: general 2D sketch constraints (still
+`unsupported_constraint` for non-rigid3 entities). The 2D point-distance
+closed-form path is preserved bit-for-bit.
 
 ## Architecture
 
@@ -131,8 +145,9 @@ Rotation uses the **exponential map (rotation vector)**, not quaternions: a mini
 1. ~~Stage 0 — skeleton: pipeline, diagnostics, contracts, CI, parity infra~~ ✅
 2. ~~Stage 1 — general numerical core (LM + analytic Jacobians)~~ ✅ (3D path; hand-rolled dense linear algebra)
 3. ~~Stage 2 — real rank analysis~~ ✅ (SVD rank + greedy redundancy; provable conflict shortcuts)
-4. Stage 3 (in progress) — 3D assembly (mate/coaxial/distance/angle/fixed) ✅ → full 2D sketch set (todo)
+4. Stage 3 (in progress) — 3D assembly ✅ + robotics primitives (joint family / drive / transmission, P0–P1.5) ✅ → full 2D sketch set (todo)
 5. Stage 4 — HarmonyOS NAPI deliverable (ansatz-ffi + OHOS NDK)
+6. Later: screw joints, joint limits (inequalities), explicit assembly-mode selection, sparse backend, URDF import
 
 Parallel track (evolve/): A manual proposals (done) → B automated loop → C LLM proposer → D corpus co-evolution (RSI). The golden corpus now carries three 3D cases (including bit patterns of an LM solution).
 

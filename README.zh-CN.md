@@ -18,17 +18,29 @@
 - **2D 草图约束**：重合、共线、平行、垂直、相切、距离、角度、对称、固定
 - **3D 装配约束**：6-DOF 刚体配合——贴合、同轴、距离、角度
 
-## 当前阶段：3D 装配约束已实现
+## 当前阶段：3D 装配 + 机器人学原语已实现
 
-✅ **3D 装配约束（6-DOF 刚体）已可求解**：mate（面贴合）、coaxial（同轴）、
-distance（原点距）、angle（方向夹角）、fixed（固定），数值内核为
-Levenberg–Marquardt + SO(3) 指数映射解析雅可比（FD 交叉验证）+ SVD 秩分析
-（DOF/冗余/条件数诊断）。全约束装配实测 4 次迭代收敛到残差 ~1e-13，且
-**迭代解跨平台位级一致**（见 parity case3）。
+✅ **3D 装配约束（6-DOF 刚体）**：mate（面贴合）、coaxial（同轴）、
+distance（**锚点**距离）、angle（方向夹角）、fixed（固定）。
+
+✅ **机器人学原语**：
+- **关节族**（first-class，诊断按关节报告）：revolute（消 5 留 1）、
+  cylindrical（消 4 留 2）、prismatic（含滚转锁，消 5 留 1）、
+  spherical（球副，消 3 留 3）
+- **关节驱动**：`drive` 字段以初始装配为零位驱动关节变量
+  （revolute 弧度 / prismatic 位移），施加后机构完全确定
+- **关节状态诊断**：`diagnostics.joints` 逐关节报告当前变量
+- **传动耦合**：`transmission` 约束按速比联动两个 revolute 关节
+  （齿轮/带轮，外啮合为负速比）
+
+数值内核：Levenberg–Marquardt（SVD 阻尼伪逆步）+ SO(3) 指数映射解析雅可比
+（逐约束族 FD 交叉验证）+ SVD 秩分析（DOF/冗余/条件数）。线性代数站在
+**nalgebra** 上（纯 Rust、无 BLAS、no_std），施加方式与收敛语义自持。
+实测：全约束装配 4 次迭代到 ~1e-13；三连杆机械臂双驱动 + 传动耦合收敛且
+速比精确保持；**迭代解跨平台位级一致**（parity case3/case4 冻结）。
 
 ⚠️ 尚未实现：通用 2D 草图约束（coincident/parallel/tangent 等，对 rigid3
-以外实体仍返回 `unsupported_constraint` 工具错误）。阶段 0 的 2D 点距离
-闭式解路径原样保留（位级契约冻结）。
+以外实体仍返回 `unsupported_constraint`）。2D 点距离闭式解路径位级冻结。
 
 ## 架构
 
@@ -209,8 +221,9 @@ JSON 往返同样在承诺内——serde_json 全线启用 `float_roundtrip`（�
 1. ~~阶段 0：骨架——管线、诊断框架、契约、CI、位级一致性设施~~ ✅
 2. ~~阶段 1：通用数值核心（LM + 解析雅可比）~~ ✅（3D 路径；稠密线性代数手写）
 3. ~~阶段 2：真实秩分析~~ ✅（SVD 秩 + 贪心冗余判定；冲突距离有可证明捷径）
-4. 阶段 3（进行中）：3D 装配约束（mate/coaxial/distance/angle/fixed）✅ → 2D 草图约束全集（待做）
+4. 阶段 3（进行中）：3D 装配 ✅ + 机器人学原语（关节族/驱动/传动，P0–P1.5）✅ → 2D 草图约束全集（待做）
 5. 阶段 4：HarmonyOS NAPI 交付物（基于 ansatz-ffi + OHOS NDK）
+6. 远期：螺旋副（screw）、关节限位（不等式）、装配模式显式选择、稀疏后端、URDF 导入
 
 并行轨道（evolve/）：A 手动提案（已就位）→ B 自动闭环 → C LLM 提案者 → D 语料共演化（RSI）。黄金语料已含 3 个 3D 用例（含 LM 迭代解位模式）。
 

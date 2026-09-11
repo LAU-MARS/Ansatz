@@ -20,6 +20,7 @@ schema = ["dep:schemars", "serde"]
 # 无平台分叉，且在所有目标上编译同一份代码，sqrt 等函数的正确舍入结果是
 # 构造性的跨平台位级一致（这是 no_std 下使用超越函数的标准答案）。
 libm = { workspace = true }
+nalgebra = { workspace = true, features = ["libm", "alloc"] }
 serde = { workspace = true, optional = true, features = ["alloc", "derive"] }
 schemars = { workspace = true, optional = true }
 

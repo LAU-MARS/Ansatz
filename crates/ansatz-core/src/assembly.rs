@@ -25,6 +25,7 @@ use crate::report::{
 use crate::so3::{
     hat, mat3_mul_mat, mat3_mul_vec, mat3_transpose, right_jacobian, rotation, v3, Mat3,
 };
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -65,6 +66,8 @@ enum BlockDesc {
         a: usize,
         b: usize,
         value: f64,
+        p_a: [f64; 3],
+        p_b: [f64; 3],
     },
     Angle {
         cid: u32,
@@ -77,6 +80,73 @@ enum BlockDesc {
     Fixed {
         cid: u32,
     },
+    /// 关节块（revolute / cylindrical / prismatic）：coaxial 行 + 可选的
+    /// 轴向间距行（revolute）/ 滚转角行（prismatic）/ 驱动行。
+    Joint {
+        cid: u32,
+        /// "revolute" | "cylindrical" | "prismatic"
+        jk: &'static str,
+        m: JointCtx,
+        /// revolute：轴向锚点间距目标。
+        offset: f64,
+        /// prismatic 滚转锁定：(a_ref, b_ref, cos(roll))。
+        roll: Option<([f64; 3], [f64; 3], f64)>,
+        /// 驱动目标（关节变量，以初始位形为零点）。
+        drive: Option<f64>,
+    },
+    Spherical {
+        cid: u32,
+        a: usize,
+        b: usize,
+        p_a: [f64; 3],
+        p_b: [f64; 3],
+    },
+    /// 传动耦合：θ_b − ratio·θ_a = 0（θ 均为初始相对关节变量）。
+    Transmission {
+        cid: u32,
+        ma: Box<JointCtx>,
+        mb: Box<JointCtx>,
+        ratio: f64,
+    },
+}
+
+/// 求值中单体的紧凑视图：(t, ω, R, J_r)。
+type BodyView = ([f64; 3], [f64; 3], Mat3, Mat3);
+
+/// 关节变量测量结果的梯度：(平移行, 旋转行)。
+type JointGrad = ([f64; 3], [f64; 3]);
+
+/// 关节测量上下文：轴几何 + 垂直参考方向 + 初始标定（θ₀/δ₀）。
+/// 关节变量定义为**相对初始位形**的增量——这是驱动与传动的零点约定。
+struct JointCtx {
+    a: usize,
+    b: usize,
+    p_a: [f64; 3],
+    d_a: [f64; 3],
+    p_b: [f64; 3],
+    d_b: [f64; 3],
+    /// a 体上垂直于轴的单位参考方向（确定性构造）。
+    ref_a: [f64; 3],
+    /// b 体上垂直于轴的单位参考方向。
+    ref_b: [f64; 3],
+    /// 初始原始角（atan2 值，未减零点）。
+    theta0: f64,
+    /// 初始轴向间距。
+    delta0: f64,
+}
+
+/// 确定性地取一个与 d 垂直的单位向量：与 |d| 最小的坐标轴做叉积。
+fn perp_ref(d: [f64; 3]) -> [f64; 3] {
+    let e = if d[0].abs() <= d[1].abs() && d[0].abs() <= d[2].abs() {
+        [1.0, 0.0, 0.0]
+    } else if d[1].abs() <= d[2].abs() {
+        [0.0, 1.0, 0.0]
+    } else {
+        [0.0, 0.0, 1.0]
+    };
+    let c = v3::cross(d, e);
+    let n = v3::norm(c);
+    v3::scale(c, 1.0 / n)
 }
 
 impl BlockDesc {
@@ -86,6 +156,9 @@ impl BlockDesc {
             | BlockDesc::Coaxial { cid, .. }
             | BlockDesc::Distance { cid, .. }
             | BlockDesc::Angle { cid, .. }
+            | BlockDesc::Joint { cid, .. }
+            | BlockDesc::Spherical { cid, .. }
+            | BlockDesc::Transmission { cid, .. }
             | BlockDesc::Fixed { cid } => *cid,
         }
     }
@@ -96,6 +169,15 @@ impl BlockDesc {
             BlockDesc::Coaxial { .. } => 6,
             BlockDesc::Distance { .. } | BlockDesc::Angle { .. } => 1,
             BlockDesc::Fixed { .. } => 0,
+            BlockDesc::Joint {
+                jk, roll, drive, ..
+            } => {
+                6 + if *jk == "revolute" { 1 } else { 0 }
+                    + if roll.is_some() { 1 } else { 0 }
+                    + if drive.is_some() { 1 } else { 0 }
+            }
+            BlockDesc::Spherical { .. } => 3,
+            BlockDesc::Transmission { .. } => 1,
         }
     }
 
@@ -106,6 +188,9 @@ impl BlockDesc {
             BlockDesc::Distance { .. } => "distance",
             BlockDesc::Angle { .. } => "angle",
             BlockDesc::Fixed { .. } => "fixed",
+            BlockDesc::Joint { jk, .. } => jk,
+            BlockDesc::Spherical { .. } => "spherical",
+            BlockDesc::Transmission { .. } => "transmission",
         }
     }
 }
@@ -218,7 +303,13 @@ pub(crate) fn solve(model: &Model) -> Result<SolveReport, SolveError> {
                     )?,
                 }
             }
-            ConstraintKind::Distance { a, b, value } => {
+            ConstraintKind::Distance {
+                a,
+                b,
+                value,
+                a_anchor,
+                b_anchor,
+            } => {
                 let Some(b_id) = b else {
                     return Err(SolveError::UnsupportedConstraint {
                         constraint_id: c.id,
@@ -243,6 +334,8 @@ pub(crate) fn solve(model: &Model) -> Result<SolveReport, SolveError> {
                     a: sa,
                     b: sb,
                     value: *value,
+                    p_a: anchor(a_anchor),
+                    p_b: anchor(b_anchor),
                 }
             }
             ConstraintKind::Angle {
@@ -284,6 +377,147 @@ pub(crate) fn solve(model: &Model) -> Result<SolveReport, SolveError> {
                     a_dir: [da.x, da.y, da.z],
                     b_dir: [db.x, db.y, db.z],
                     cos_v: libm::cos(*value),
+                }
+            }
+            ConstraintKind::Revolute {
+                a,
+                b,
+                a_axis,
+                b_axis,
+                offset,
+                drive,
+            } => {
+                let (sa, sb) = two_slots(c, *a, *b, &find_slot)?;
+                let m = joint_ctx(&slots, sa, sb, a_axis, b_axis)?;
+                BlockDesc::Joint {
+                    cid: c.id,
+                    jk: "revolute",
+                    m,
+                    offset: offset.unwrap_or(0.0),
+                    roll: None,
+                    drive: *drive,
+                }
+            }
+            ConstraintKind::Cylindrical {
+                a,
+                b,
+                a_axis,
+                b_axis,
+            } => {
+                let (sa, sb) = two_slots(c, *a, *b, &find_slot)?;
+                let m = joint_ctx(&slots, sa, sb, a_axis, b_axis)?;
+                BlockDesc::Joint {
+                    cid: c.id,
+                    jk: "cylindrical",
+                    m,
+                    offset: 0.0,
+                    roll: None,
+                    drive: None,
+                }
+            }
+            ConstraintKind::Prismatic {
+                a,
+                b,
+                a_axis,
+                b_axis,
+                a_ref,
+                b_ref,
+                roll,
+                drive,
+            } => {
+                let (sa, sb) = two_slots(c, *a, *b, &find_slot)?;
+                let m = joint_ctx(&slots, sa, sb, a_axis, b_axis)?;
+                let roll_data = match (a_ref, b_ref, roll) {
+                    (Some(ra), Some(rb), Some(v)) => {
+                        if !(0.0..=core::f64::consts::PI).contains(v) {
+                            return Err(SolveError::InvalidModel {
+                                reason: format!(
+                                    "约束 {}（prismatic）的 roll 必须在 [0, π] 弧度内，得到 {v:e}。",
+                                    c.id
+                                ),
+                            });
+                        }
+                        Some(([ra.x, ra.y, ra.z], [rb.x, rb.y, rb.z], libm::cos(*v)))
+                    }
+                    _ => None, // 参考方向缺省：退化为圆柱副语义
+                };
+                BlockDesc::Joint {
+                    cid: c.id,
+                    jk: "prismatic",
+                    m,
+                    offset: 0.0,
+                    roll: roll_data,
+                    drive: *drive,
+                }
+            }
+            ConstraintKind::Spherical {
+                a,
+                b,
+                a_point,
+                b_point,
+            } => {
+                let (sa, sb) = two_slots(c, *a, *b, &find_slot)?;
+                BlockDesc::Spherical {
+                    cid: c.id,
+                    a: sa,
+                    b: sb,
+                    p_a: [a_point.x, a_point.y, a_point.z],
+                    p_b: [b_point.x, b_point.y, b_point.z],
+                }
+            }
+            ConstraintKind::Transmission {
+                joint_a,
+                joint_b,
+                ratio,
+            } => {
+                // 两个被耦合的关节必须是本模型中已声明的 revolute
+                let find_revolute = |want: u32| -> Option<(
+                    usize,
+                    usize,
+                    crate::model::Axis3,
+                    crate::model::Axis3,
+                )> {
+                    for c2 in &model.constraints {
+                        if c2.id == want {
+                            if let ConstraintKind::Revolute {
+                                a,
+                                b,
+                                a_axis,
+                                b_axis,
+                                ..
+                            } = &c2.kind
+                            {
+                                let sa = find_slot(*a)?;
+                                let sb = find_slot(*b)?;
+                                return Some((sa, sb, *a_axis, *b_axis));
+                            }
+                        }
+                    }
+                    None
+                };
+                let Some((aa, ab, ax_a, ax_b)) = find_revolute(*joint_a) else {
+                    return Err(SolveError::InvalidModel {
+                        reason: format!(
+                            "传动约束 {} 引用的 joint_a={} 不存在或不是 revolute 关节。",
+                            c.id, joint_a
+                        ),
+                    });
+                };
+                let Some((ba, bb, bx_a, bx_b)) = find_revolute(*joint_b) else {
+                    return Err(SolveError::InvalidModel {
+                        reason: format!(
+                            "传动约束 {} 引用的 joint_b={} 不存在或不是 revolute 关节。",
+                            c.id, joint_b
+                        ),
+                    });
+                };
+                let ma = joint_ctx(&slots, aa, ab, &ax_a, &ax_b)?;
+                let mb = joint_ctx(&slots, ba, bb, &bx_a, &bx_b)?;
+                BlockDesc::Transmission {
+                    cid: c.id,
+                    ma: Box::new(ma),
+                    mb: Box::new(mb),
+                    ratio: *ratio,
                 }
             }
             other => {
@@ -409,6 +643,51 @@ pub(crate) fn solve(model: &Model) -> Result<SolveReport, SolveError> {
         .max_by(|a, b| a.residual.abs().total_cmp(&b.residual.abs()))
         .cloned();
 
+    // 关节状态：收敛位形下逐关节测量（θ/δ 以初始位形为零点）
+    let mut joints: Vec<crate::report::JointState> = Vec::new();
+    for block in &blocks {
+        if let BlockDesc::Joint {
+            cid, jk, m, drive, ..
+        } = block
+        {
+            let value = if *jk == "prismatic" {
+                measure_delta(
+                    &bodies_now(&x, &slots, m.a),
+                    &bodies_now(&x, &slots, m.b),
+                    m.p_a,
+                    m.d_a,
+                    m.p_b,
+                )
+                .0 - m.delta0
+            } else {
+                let (theta, _, _) = measure_theta(
+                    &bodies_now(&x, &slots, m.a),
+                    &bodies_now(&x, &slots, m.b),
+                    m.p_a,
+                    m.d_a,
+                    m.ref_a,
+                    m.p_b,
+                    m.d_b,
+                    m.ref_b,
+                );
+                angle_pi(theta - m.theta0)
+            };
+            joints.push(crate::report::JointState {
+                constraint_id: *cid,
+                joint_kind: (*jk).into(),
+                value,
+                human_message: format!(
+                    "关节 {cid}（{jk}）的当前变量为 {value:e}（以初始位形为零点{}）。",
+                    if drive.is_some() {
+                        "；驱动目标已施加"
+                    } else {
+                        ""
+                    }
+                ),
+            });
+        }
+    }
+
     let mut suggestions: Vec<Suggestion> = Vec::new();
     for cid in &redundant {
         suggestions.push(Suggestion {
@@ -468,6 +747,7 @@ pub(crate) fn solve(model: &Model) -> Result<SolveReport, SolveError> {
         diagnostics: Diagnostics {
             dof_total,
             dof_remaining,
+            joints,
             redundant_constraints: redundant
                 .iter()
                 .map(|&cid| RedundancyGroup {
@@ -563,20 +843,29 @@ fn eval(x: &[f64], slots: &[BodySlot], blocks: &[BlockDesc]) -> (Vec<f64>, Vec<f
                 a,
                 b,
                 value,
+                p_a,
+                p_b,
             } => {
-                let pa = bodies[a];
-                let pb = bodies[b];
-                let dt = v3::sub(pa.0, pb.0);
+                // 锚点式：r = ‖P_A(p_a) − P_B(p_b)‖ − value（锚点缺省即原点，
+                // 与 0.2.0 的原点距语义逐位一致）
+                let pa_w = world_point(&bodies[a], p_a);
+                let pb_w = world_point(&bodies[b], p_b);
+                let dt = v3::sub(pa_w, pb_w);
                 let dist = v3::norm(dt);
                 r[row] = dist - value;
                 if dist > 0.0 {
                     let u = v3::scale(dt, 1.0 / dist);
                     if let Some(off) = slots[a].param_off {
+                        // ∂r/∂t_a = u；∂r/∂ω_a = (∂pa_w/∂ω_a)ᵀ·u
                         write_row(&mut j, n, row, off, u);
+                        let g = tmul(&point_jac(&bodies[a], p_a), u);
+                        write_row(&mut j, n, row, off + 3, g);
                     }
                     if let Some(off) = slots[b].param_off {
                         let neg = v3::scale(u, -1.0);
                         write_row(&mut j, n, row, off, neg);
+                        let g = tmul(&point_jac(&bodies[b], p_b), u);
+                        write_row(&mut j, n, row, off + 3, v3::scale(g, -1.0));
                     }
                 } // dist == 0：梯度未定义，J 行保持 0（条件数按退化处理）
             }
@@ -737,10 +1026,308 @@ fn eval(x: &[f64], slots: &[BodySlot], blocks: &[BlockDesc]) -> (Vec<f64>, Vec<f
                     write_mat(&mut j, n, row + 3, off + 3, &m_p);
                 }
             }
+            BlockDesc::Joint {
+                cid: _,
+                jk,
+                ref m,
+                offset,
+                ref roll,
+                drive,
+            } => {
+                // ── 行 0..6：coaxial 行（同轴 + 横向偏移）──
+                let pa_w = world_point(&bodies[m.a], m.p_a);
+                let da_w = world_dir(&bodies[m.a], m.d_a);
+                let pb_w = world_point(&bodies[m.b], m.p_b);
+                emit_coaxial_rows(
+                    &mut r, &mut j, n, row, slots, &bodies, m.a, m.b, m.p_a, m.d_a, m.p_b, m.d_b,
+                );
+                let mut rr = row + 6;
+                // ── revolute：轴向间距行 r = (pA_w − pB_w)·n − offset ──
+                if jk == "revolute" {
+                    let dp = v3::sub(pa_w, pb_w);
+                    let n_w = da_w;
+                    r[rr] = v3::dot(dp, n_w) - offset;
+                    if let Some(off) = slots[m.a].param_off {
+                        write_row(&mut j, n, rr, off, n_w);
+                        let pa_j = point_jac(&bodies[m.a], m.p_a);
+                        let n_j = dir_jac(&bodies[m.a], m.d_a);
+                        let g = v3::add(tmul(&pa_j, n_w), tmul(&n_j, dp));
+                        write_row(&mut j, n, rr, off + 3, g);
+                    }
+                    if let Some(off) = slots[m.b].param_off {
+                        write_row(&mut j, n, rr, off, v3::scale(n_w, -1.0));
+                        let g = tmul(&point_jac(&bodies[m.b], m.p_b), n_w);
+                        write_row(&mut j, n, rr, off + 3, v3::scale(g, -1.0));
+                    }
+                    rr += 1;
+                }
+                // ── prismatic 滚转锁定：Angle 机制（a_ref/b_ref/cos(roll)）──
+                if let Some((ra, rb, cos_v)) = roll.as_ref() {
+                    let ua = world_dir(&bodies[m.a], *ra);
+                    let ub = world_dir(&bodies[m.b], *rb);
+                    r[rr] = v3::dot(ua, ub) - cos_v;
+                    if let Some(off) = slots[m.a].param_off {
+                        let g = tmul(&dir_jac(&bodies[m.a], *ra), ub);
+                        write_row(&mut j, n, rr, off + 3, g);
+                    }
+                    if let Some(off) = slots[m.b].param_off {
+                        let g = tmul(&dir_jac(&bodies[m.b], *rb), ua);
+                        write_row(&mut j, n, rr, off + 3, g);
+                    }
+                    rr += 1;
+                }
+                // ── 驱动行：关节变量（初始为零点）到目标 ──
+                if let Some(target) = drive.as_ref() {
+                    if jk == "prismatic" {
+                        let (delta, (gat, gaw), (gbt, gbw)) =
+                            measure_delta(&bodies[m.a], &bodies[m.b], m.p_a, m.d_a, m.p_b);
+                        r[rr] = (delta - m.delta0) - target;
+                        if let Some(off) = slots[m.a].param_off {
+                            write_row(&mut j, n, rr, off, gat);
+                            write_row(&mut j, n, rr, off + 3, gaw);
+                        }
+                        if let Some(off) = slots[m.b].param_off {
+                            write_row(&mut j, n, rr, off, gbt);
+                            write_row(&mut j, n, rr, off + 3, gbw);
+                        }
+                    } else {
+                        let (theta, ga, gb) = measure_theta(
+                            &bodies[m.a],
+                            &bodies[m.b],
+                            m.p_a,
+                            m.d_a,
+                            m.ref_a,
+                            m.p_b,
+                            m.d_b,
+                            m.ref_b,
+                        );
+                        r[rr] = angle_pi(theta - m.theta0) - target;
+                        if let Some(off) = slots[m.a].param_off {
+                            write_row(&mut j, n, rr, off + 3, ga);
+                        }
+                        if let Some(off) = slots[m.b].param_off {
+                            write_row(&mut j, n, rr, off + 3, gb);
+                        }
+                    }
+                    rr += 1;
+                }
+                let _ = rr;
+            }
+            BlockDesc::Spherical {
+                cid: _,
+                a,
+                b,
+                p_a,
+                p_b,
+            } => {
+                // 锚点重合：r = pA_w − pB_w（3 行，秩 3）
+                let pa_w = world_point(&bodies[a], p_a);
+                let pb_w = world_point(&bodies[b], p_b);
+                let d3 = v3::sub(pa_w, pb_w);
+                r[row] = d3[0];
+                r[row + 1] = d3[1];
+                r[row + 2] = d3[2];
+                if let Some(off) = slots[a].param_off {
+                    write_row(&mut j, n, row, off, [1.0, 0.0, 0.0]);
+                    write_row(&mut j, n, row + 1, off, [0.0, 1.0, 0.0]);
+                    write_row(&mut j, n, row + 2, off, [0.0, 0.0, 1.0]);
+                    let g = point_jac(&bodies[a], p_a);
+                    write_mat(&mut j, n, row, off + 3, &g);
+                }
+                if let Some(off) = slots[b].param_off {
+                    write_row(&mut j, n, row, off, [-1.0, 0.0, 0.0]);
+                    write_row(&mut j, n, row + 1, off, [0.0, -1.0, 0.0]);
+                    write_row(&mut j, n, row + 2, off, [0.0, 0.0, -1.0]);
+                    let g = point_jac(&bodies[b], p_b);
+                    let neg = [
+                        [-g[0][0], -g[0][1], -g[0][2]],
+                        [-g[1][0], -g[1][1], -g[1][2]],
+                        [-g[2][0], -g[2][1], -g[2][2]],
+                    ];
+                    write_mat(&mut j, n, row, off + 3, &neg);
+                }
+            }
+            BlockDesc::Transmission {
+                cid: _,
+                ref ma,
+                ref mb,
+                ratio,
+            } => {
+                // r = θ_b − ratio·θ_a（θ 均为初始相对关节变量）
+                let (ta, ga_a, ga_b) = measure_theta(
+                    &bodies[ma.a],
+                    &bodies[ma.b],
+                    ma.p_a,
+                    ma.d_a,
+                    ma.ref_a,
+                    ma.p_b,
+                    ma.d_b,
+                    ma.ref_b,
+                );
+                let (tb, gb_a, gb_b) = measure_theta(
+                    &bodies[mb.a],
+                    &bodies[mb.b],
+                    mb.p_a,
+                    mb.d_a,
+                    mb.ref_a,
+                    mb.p_b,
+                    mb.d_b,
+                    mb.ref_b,
+                );
+                r[row] = angle_pi(tb - mb.theta0) - ratio * angle_pi(ta - ma.theta0);
+                // 梯度：dθ_b − ratio·dθ_a。中间体可能同时是两个关节的端点
+                //（如行星轮系），贡献必须**累加**而非覆盖。
+                let mut add_row = |col: usize, v: [f64; 3]| {
+                    for k in 0..3 {
+                        j[row * n + col + k] += v[k];
+                    }
+                };
+                if let Some(off) = slots[ma.a].param_off {
+                    add_row(off + 3, v3::scale(ga_a, -ratio));
+                }
+                if let Some(off) = slots[ma.b].param_off {
+                    add_row(off + 3, v3::scale(ga_b, -ratio));
+                }
+                if let Some(off) = slots[mb.a].param_off {
+                    add_row(off + 3, gb_a);
+                }
+                if let Some(off) = slots[mb.b].param_off {
+                    add_row(off + 3, gb_b);
+                }
+            }
         }
         row += block.rows();
     }
     (r, j)
+}
+
+/// 按当前参数取向量的体求值元组（自由体取 x，fixed 体取输入位姿）。
+fn bodies_now(x: &[f64], slots: &[BodySlot], i: usize) -> ([f64; 3], [f64; 3], Mat3, Mat3) {
+    match slots[i].param_off {
+        Some(off) => (
+            [x[off], x[off + 1], x[off + 2]],
+            [x[off + 3], x[off + 4], x[off + 5]],
+            rotation([x[off + 3], x[off + 4], x[off + 5]]),
+            right_jacobian([x[off + 3], x[off + 4], x[off + 5]]),
+        ),
+        None => {
+            let (t, w) = slots[i].pose;
+            (t, w, rotation(w), right_jacobian(w))
+        }
+    }
+}
+
+/// 把 atan2 的 (−π, π] 主值差折回同区间（关节变量的连续化）。
+fn angle_pi(x: f64) -> f64 {
+    // x 可能略越界（浮点），用两次取模折回
+    let mut v = x;
+    while v > core::f64::consts::PI {
+        v -= 2.0 * core::f64::consts::PI;
+    }
+    while v <= -core::f64::consts::PI {
+        v += 2.0 * core::f64::consts::PI;
+    }
+    v
+}
+
+/// 发射 coaxial 的 6 行残差与雅可比（Joint 块复用 Coaxial 的机制）。
+#[allow(clippy::too_many_arguments)]
+fn emit_coaxial_rows(
+    r: &mut [f64],
+    j: &mut [f64],
+    n: usize,
+    row: usize,
+    slots: &[BodySlot],
+    bodies: &[([f64; 3], [f64; 3], Mat3, Mat3)],
+    a: usize,
+    b: usize,
+    p_a: [f64; 3],
+    d_a: [f64; 3],
+    p_b: [f64; 3],
+    d_b: [f64; 3],
+) {
+    let pa_w = v3::add(bodies[a].0, mat3_mul_vec(&bodies[a].2, p_a));
+    let da_w = mat3_mul_vec(&bodies[a].2, d_a);
+    let pb_w = v3::add(bodies[b].0, mat3_mul_vec(&bodies[b].2, p_b));
+    let db_w = mat3_mul_vec(&bodies[b].2, d_b);
+    let dp = v3::sub(pa_w, pb_w);
+    let rc = v3::cross(da_w, db_w);
+    r[row] = rc[0];
+    r[row + 1] = rc[1];
+    r[row + 2] = rc[2];
+    let rp = v3::cross(dp, db_w);
+    r[row + 3] = rp[0];
+    r[row + 4] = rp[1];
+    r[row + 5] = rp[2];
+    let write_mat = |j: &mut [f64], row0: usize, col: usize, m: &Mat3| {
+        for i in 0..3 {
+            for k in 0..3 {
+                j[(row0 + i) * n + col + k] = m[i][k];
+            }
+        }
+    };
+    if let Some(off) = slots[a].param_off {
+        let m_c = mat3_mul_mat(
+            &mat3_mul_mat(&hat(db_w), &bodies[a].2),
+            &mat3_mul_mat(&hat(d_a), &bodies[a].3),
+        );
+        write_mat(j, row, off + 3, &m_c);
+        let neg_hat = hat(db_w);
+        write_mat(
+            j,
+            row + 3,
+            off,
+            &[
+                [-neg_hat[0][0], -neg_hat[0][1], -neg_hat[0][2]],
+                [-neg_hat[1][0], -neg_hat[1][1], -neg_hat[1][2]],
+                [-neg_hat[2][0], -neg_hat[2][1], -neg_hat[2][2]],
+            ],
+        );
+        let m_p = mat3_mul_mat(
+            &mat3_mul_mat(&hat(db_w), &bodies[a].2),
+            &mat3_mul_mat(&hat(p_a), &bodies[a].3),
+        );
+        write_mat(j, row + 3, off + 3, &m_p);
+    }
+    if let Some(off) = slots[b].param_off {
+        let m_c = mat3_mul_mat(
+            &mat3_mul_mat(&hat(da_w), &bodies[b].2),
+            &mat3_mul_mat(&hat(d_b), &bodies[b].3),
+        );
+        let m_c = [
+            [-m_c[0][0], -m_c[0][1], -m_c[0][2]],
+            [-m_c[1][0], -m_c[1][1], -m_c[1][2]],
+            [-m_c[2][0], -m_c[2][1], -m_c[2][2]],
+        ];
+        write_mat(j, row, off + 3, &m_c);
+        write_mat(j, row + 3, off, &hat(db_w));
+        let m1 = mat3_mul_mat(
+            &mat3_mul_mat(&hat(db_w), &bodies[b].2),
+            &mat3_mul_mat(&hat(p_b), &bodies[b].3),
+        );
+        let m2 = mat3_mul_mat(
+            &mat3_mul_mat(&hat(dp), &bodies[b].2),
+            &mat3_mul_mat(&hat(d_b), &bodies[b].3),
+        );
+        let m_p = [
+            [
+                -(m1[0][0] + m2[0][0]),
+                -(m1[0][1] + m2[0][1]),
+                -(m1[0][2] + m2[0][2]),
+            ],
+            [
+                -(m1[1][0] + m2[1][0]),
+                -(m1[1][1] + m2[1][1]),
+                -(m1[1][2] + m2[1][2]),
+            ],
+            [
+                -(m1[2][0] + m2[2][0]),
+                -(m1[2][1] + m2[2][1]),
+                -(m1[2][2] + m2[2][2]),
+            ],
+        ];
+        write_mat(j, row + 3, off + 3, &m_p);
+    }
 }
 
 /// 秩 / 条件数 / 冗余块分析。
@@ -792,6 +1379,7 @@ fn inconsistent_negative_distance(model: &Model, cid: u32, value: f64) -> SolveR
         diagnostics: Diagnostics {
             dof_total: (model.entities.len() * 6) as u32,
             dof_remaining: (model.entities.len() * 6) as u32,
+            joints: Vec::new(),
             redundant_constraints: Vec::from([RedundancyGroup {
                 constraint_ids: Vec::from([cid]),
                 human_message: format!(
@@ -851,6 +1439,7 @@ fn inconsistent_conflicting_distances(
         diagnostics: Diagnostics {
             dof_total: (model.entities.len() * 6) as u32,
             dof_remaining: (model.entities.len() * 6) as u32,
+            joints: Vec::new(),
             redundant_constraints: Vec::from([RedundancyGroup {
                 constraint_ids: cids.clone(),
                 human_message: format!(
@@ -908,6 +1497,156 @@ fn two_slots(
     Ok((sa, sb))
 }
 
+/// 锚点取值：None -> 原点。
+fn anchor(v: &Option<crate::model::Vec3>) -> [f64; 3] {
+    match v {
+        None => [0.0, 0.0, 0.0],
+        Some(p) => [p.x, p.y, p.z],
+    }
+}
+
+/// 构建关节测量上下文：归一轴几何 + 确定性垂直参考 + 初始标定。
+fn joint_ctx(
+    slots: &[BodySlot],
+    a: usize,
+    b: usize,
+    a_axis: &crate::model::Axis3,
+    b_axis: &crate::model::Axis3,
+) -> Result<JointCtx, SolveError> {
+    let da = unit_raw(&[a_axis.direction.x, a_axis.direction.y, a_axis.direction.z])?;
+    let db = unit_raw(&[b_axis.direction.x, b_axis.direction.y, b_axis.direction.z])?;
+    let p_a = [a_axis.origin.x, a_axis.origin.y, a_axis.origin.z];
+    let p_b = [b_axis.origin.x, b_axis.origin.y, b_axis.origin.z];
+    let ref_a = perp_ref(da);
+    let ref_b = perp_ref(db);
+    // 初始标定：用输入位姿计算 θ₀ 与 δ₀
+    let ba = body_pose(&slots[a]);
+    let bb = body_pose(&slots[b]);
+    let (theta0, _, _) = measure_theta(&ba, &bb, p_a, da, ref_a, p_b, db, ref_b);
+    let delta0 = measure_delta(&ba, &bb, p_a, da, p_b).0;
+    Ok(JointCtx {
+        a,
+        b,
+        p_a,
+        d_a: da,
+        p_b,
+        d_b: db,
+        ref_a,
+        ref_b,
+        theta0,
+        delta0,
+    })
+}
+
+/// 单位化（无约束上下文版本）。
+fn unit_raw(v: &[f64; 3]) -> Result<[f64; 3], SolveError> {
+    let n = v3::norm(*v);
+    if n == 0.0 {
+        return Err(SolveError::InvalidModel {
+            reason: String::from("关节轴方向不能是零向量。"),
+        });
+    }
+    Ok(v3::scale(*v, 1.0 / n))
+}
+
+/// 体的当前位姿（仅用于构建期的初始标定：自由体取输入位姿）。
+fn body_pose(slot: &BodySlot) -> ([f64; 3], [f64; 3], Mat3, Mat3) {
+    let (t, w) = slot.pose;
+    (t, w, rotation(w), right_jacobian(w))
+}
+
+/// 关节角测量（原始 atan2 值）：两垂直参考方向绕轴的有向夹角。
+/// 返回 (θ_raw, 对 a 体 ω 的梯度行, 对 b 体 ω 的梯度行)。
+///
+/// θ = atan2(s, c)，s = (uA×uB)·n，c = uA·uB；
+/// uA = RA·ref_a，uB = RB·ref_b，n = RA·d_a。
+/// 链式法则全部复用 point/dir 雅可比（经 FD 交叉验证的机器）。
+#[allow(clippy::too_many_arguments)]
+fn measure_theta(
+    ba: &BodyView,
+    bb: &BodyView,
+    _p_a: [f64; 3],
+    d_a: [f64; 3],
+    ref_a: [f64; 3],
+    _p_b: [f64; 3],
+    _d_b: [f64; 3],
+    ref_b: [f64; 3],
+) -> (f64, [f64; 3], [f64; 3]) {
+    let (ja, jb) = (right_jacobian(ba.1), right_jacobian(bb.1));
+    // 世界量
+    let ua = mat3_mul_vec(&ba.2, ref_a);
+    let ub = mat3_mul_vec(&bb.2, ref_b);
+    let n = mat3_mul_vec(&ba.2, d_a);
+    let cx = v3::cross(ua, ub);
+    let s = v3::dot(cx, n);
+    let c = v3::dot(ua, ub);
+    let theta = libm::atan2(s, c);
+    let denom = s * s + c * c;
+    if denom < 1e-30 {
+        // 参考方向平行/反平行：测量退化（关节绕轴 ±π 处），梯度置零并如实报告
+        return (theta, [0.0; 3], [0.0; 3]);
+    }
+    let k = 1.0 / denom;
+    // dθ = (c·ds − s·dc)·k
+    // ds|ωA = M_Aᵀ(uB×n) + N_Aᵀ(uA×uB)；dc|ωA = M_Aᵀ·uB
+    // ds|ωB = M_Bᵀ(n×uA)；dc|ωB = M_Bᵀ·uA
+    // 其中 M_A = ∂uA/∂ωA = −RA·hat(ref_a)·J_A，N_A = ∂n/∂ωA 同构
+    // ∂uA/∂ωA = −R·hat(ref_a)·J_A（右扰动约定，负号与 eval 的 point/dir_jac 一致）
+    let neg3 = |m: &Mat3| {
+        [
+            [-m[0][0], -m[0][1], -m[0][2]],
+            [-m[1][0], -m[1][1], -m[1][2]],
+            [-m[2][0], -m[2][1], -m[2][2]],
+        ]
+    };
+    let m_a = neg3(&mat3_mul_mat(&mat3_mul_mat(&ba.2, &hat(ref_a)), &ja));
+    let n_a = neg3(&mat3_mul_mat(&mat3_mul_mat(&ba.2, &hat(d_a)), &ja));
+    let m_b = neg3(&mat3_mul_mat(&mat3_mul_mat(&bb.2, &hat(ref_b)), &jb));
+    let ga = {
+        let t1 = mat3_mul_vec(&mat3_transpose(&m_a), v3::cross(ub, n));
+        let t2 = mat3_mul_vec(&mat3_transpose(&n_a), cx);
+        let ds = v3::add(t1, t2);
+        let dc = mat3_mul_vec(&mat3_transpose(&m_a), ub);
+        v3::scale(v3::sub(v3::scale(ds, c), v3::scale(dc, s)), k)
+    };
+    let gb = {
+        let ds = mat3_mul_vec(&mat3_transpose(&m_b), v3::cross(n, ua));
+        let dc = mat3_mul_vec(&mat3_transpose(&m_b), ua);
+        v3::scale(v3::sub(v3::scale(ds, c), v3::scale(dc, s)), k)
+    };
+    (theta, ga, gb)
+}
+
+/// 轴向间距测量：δ = (pB_w − pA_w)·n。返回 (δ, 对 a 的 (t,ω) 梯度, 对 b 的)。
+fn measure_delta(
+    ba: &BodyView,
+    bb: &BodyView,
+    p_a: [f64; 3],
+    d_a: [f64; 3],
+    p_b: [f64; 3],
+) -> (f64, JointGrad, JointGrad) {
+    let ja = right_jacobian(ba.1);
+    let jb = right_jacobian(bb.1);
+    let pa_w = v3::add(ba.0, mat3_mul_vec(&ba.2, p_a));
+    let pb_w = v3::add(bb.0, mat3_mul_vec(&bb.2, p_b));
+    let n = mat3_mul_vec(&ba.2, d_a);
+    let dp = v3::sub(pb_w, pa_w);
+    let delta = v3::dot(dp, n);
+    // ∂δ/∂tB = n；∂δ/∂tA = −n
+    // ∂δ/∂ωB = P_Bᵀ·n（P_B = ∂pb_w/∂ωB）
+    // ∂δ/∂ωA = −P_Aᵀ·n + N_Aᵀ·dp（N_A = ∂n/∂ωA）
+    let p_a_jac = mat3_mul_mat(&mat3_mul_mat(&ba.2, &hat(p_a)), &ja);
+    let p_b_jac = mat3_mul_mat(&mat3_mul_mat(&bb.2, &hat(p_b)), &jb);
+    let n_jac = mat3_mul_mat(&mat3_mul_mat(&ba.2, &hat(d_a)), &ja);
+    // 真导数带负号（−R·hat·J）：∂δ/∂ωA = +p_a_jacᵀ·n − n_jacᵀ·dp；∂δ/∂ωB = −p_b_jacᵀ·n
+    let ga_w = v3::sub(
+        mat3_mul_vec(&mat3_transpose(&p_a_jac), n),
+        mat3_mul_vec(&mat3_transpose(&n_jac), dp),
+    );
+    let gb_w = v3::scale(mat3_mul_vec(&mat3_transpose(&p_b_jac), n), -1.0);
+    (delta, (v3::scale(n, -1.0), ga_w), (n, gb_w))
+}
+
 fn unit(c: &Constraint, v: &[f64; 3], field: &str) -> Result<[f64; 3], SolveError> {
     let norm = v3::norm(*v);
     if norm == 0.0 {
@@ -958,6 +1697,8 @@ mod tests {
                     a: 0,
                     b: 1,
                     value: 1.5,
+                    p_a: [0.15, -0.05, 0.20],
+                    p_b: [0.05, 0.10, -0.15],
                 },
                 BlockDesc::Angle {
                     cid: 4,
@@ -982,6 +1723,111 @@ mod tests {
             },
         ]);
         let blocks = make_blocks();
+        let (r0, j0) = eval(&x, &slots, &blocks);
+        let m = r0.len();
+        let n = x.len();
+        let h = 1e-6;
+        for col in 0..n {
+            let mut xp = x.clone();
+            let mut xm = x.clone();
+            xp[col] += h;
+            xm[col] -= h;
+            let (rp, _) = eval(&xp, &slots, &blocks);
+            let (rm, _) = eval(&xm, &slots, &blocks);
+            for row in 0..m {
+                let fd = (rp[row] - rm[row]) / (2.0 * h);
+                let an = j0[row * n + col];
+                assert!(
+                    (fd - an).abs() < 1e-5,
+                    "J[{row}][{col}] 解析 {an:e} vs 差分 {fd:e}（差 {:e}）",
+                    (fd - an).abs()
+                );
+            }
+        }
+    }
+
+    /// 新块类型（revolute/cylindrical/prismatic/spherical/transmission/drive）
+    /// 的解析雅可比 vs 中心差分。三体模型：关节 J1 连 0-1，J2 连 1-2，
+    /// 传动耦合 J1 与 J2。
+    #[test]
+    fn analytic_jacobian_matches_fd_joints_and_transmission() {
+        let x: Vec<f64> = Vec::from([
+            0.10, 0.05, -0.02, 0.01, -0.02, 0.03, // body 0
+            0.60, 0.20, 0.30, 0.05, 0.02, -0.10, // body 1
+            1.10, -0.30, 0.50, -0.06, 0.12, 0.08, // body 2
+        ]);
+        let mk_ctx = |a: usize, b: usize| {
+            let d_a = unit3([0.0, 0.0, 1.0]);
+            let d_b = unit3([0.1, 0.1, 1.0]);
+            JointCtx {
+                a,
+                b,
+                p_a: [0.0, 0.0, 0.0],
+                d_a,
+                p_b: [0.05, -0.05, 0.0],
+                d_b,
+                ref_a: perp_ref(d_a),
+                ref_b: perp_ref(d_b),
+                theta0: 0.0,
+                delta0: 0.0,
+            }
+        };
+        let blocks = Vec::from([
+            BlockDesc::Joint {
+                cid: 1,
+                jk: "revolute",
+                m: mk_ctx(0, 1),
+                offset: 0.15,
+                roll: None,
+                drive: Some(0.30),
+            },
+            BlockDesc::Joint {
+                cid: 2,
+                jk: "prismatic",
+                m: mk_ctx(1, 2),
+                offset: 0.0,
+                roll: Some(([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], libm::cos(0.4))),
+                drive: Some(0.20),
+            },
+            BlockDesc::Joint {
+                cid: 3,
+                jk: "cylindrical",
+                m: mk_ctx(0, 2),
+                offset: 0.0,
+                roll: None,
+                drive: None,
+            },
+            BlockDesc::Spherical {
+                cid: 4,
+                a: 0,
+                b: 2,
+                p_a: [0.10, 0.20, 0.30],
+                p_b: [-0.05, 0.15, 0.25],
+            },
+            BlockDesc::Transmission {
+                cid: 5,
+                ma: Box::new(mk_ctx(0, 1)),
+                mb: Box::new(mk_ctx(1, 2)),
+                ratio: -0.5,
+            },
+        ]);
+        let slots = Vec::from([
+            BodySlot {
+                entity_idx: 0,
+                param_off: Some(0),
+                pose: ([0.0; 3], [0.0; 3]),
+            },
+            BodySlot {
+                entity_idx: 1,
+                param_off: Some(6),
+                pose: ([0.0; 3], [0.0; 3]),
+            },
+            BodySlot {
+                entity_idx: 2,
+                param_off: Some(12),
+                pose: ([0.0; 3], [0.0; 3]),
+            },
+        ]);
         let (r0, j0) = eval(&x, &slots, &blocks);
         let m = r0.len();
         let n = x.len();

@@ -34,7 +34,7 @@ const parseHex = (s) => BigInt(s);
 
 console.log(`wasm version() = ${wasm.version()}`);
 
-for (const name of ['case1', 'case2']) {
+for (const name of ['case1', 'case2', 'case3', 'case4']) {
   const model = JSON.parse(readFileSync(path.join(PARITY_DIR, `${name}.model.json`), 'utf8'));
   const expected = JSON.parse(readFileSync(path.join(PARITY_DIR, `${name}.expected.json`), 'utf8'));
 
@@ -76,11 +76,17 @@ for (const name of ['case1', 'case2']) {
   const structured = wasm.solve(model);
   assert.equal(structured.ok, true);
   assert.equal(structured.result.outcome, expected.outcome);
-  const g = structured.result.entities[0].geometry;
-  assert.equal(bitsOf(g.x), parseHex(expected.entities[0].x), `${name} structured.x`);
-  assert.equal(bitsOf(g.y), parseHex(expected.entities[0].y), `${name} structured.y`);
+  const sg = structured.result.entities[0].geometry;
+  const wg = expected.entities[0];
+  let firstNum, wantFirst;
+  if (sg.type === 'point2') {
+    firstNum = sg.x; wantFirst = wg.x;
+  } else {
+    firstNum = sg.pose.translation.x; wantFirst = wg.pose.tx;
+  }
+  assert.equal(bitsOf(firstNum), parseHex(wantFirst), `${name} structured first field`);
 
-  console.log(`${name}: 位级一致（x=${hexOf(g.x)}）`);
+  console.log(`${name}: 位级一致`);
 }
 
 // 4) 错误路径：非法 JSON / 冲突模型

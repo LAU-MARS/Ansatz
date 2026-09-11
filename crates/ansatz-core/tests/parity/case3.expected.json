@@ -10,5 +10,5 @@
                           "rx": "0x3FC91FA45A6EF51A", "ry": "0xBFB96EDC01A1C38A", "rz": "0xBF840C83A508E8EF" } }
   ],
   "max_residual_abs": "0x3D7C2E0000000000",
-  "jacobian_condition_estimate": "0x4017AE774755A209"
+  "jacobian_condition_estimate": "0x4017AE774755A208"
 }

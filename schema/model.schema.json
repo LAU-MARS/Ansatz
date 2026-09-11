@@ -213,13 +213,24 @@
           ]
         },
         {
-          "description": "距离。`b = None` 表示到坐标原点（**骨架阶段唯一受支持的算例**）。",
+          "description": "距离。2D：`b = None` 表示到坐标原点。3D 装配：a、b 为两个 Rigid3，\n距离在**锚点**之间测量（体坐标系；缺省为各自原点）。",
           "type": "object",
           "properties": {
             "a": {
               "type": "integer",
               "format": "uint32",
               "minimum": 0
+            },
+            "a_anchor": {
+              "description": "a 体上的锚点（体坐标系）；缺省 (0,0,0)。",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Vec3"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "b": {
               "type": [
@@ -228,6 +239,17 @@
               ],
               "format": "uint32",
               "minimum": 0
+            },
+            "b_anchor": {
+              "description": "b 体上的锚点（体坐标系）；缺省 (0,0,0)。",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Vec3"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "type": {
               "type": "string",
@@ -420,6 +442,224 @@
             "b",
             "a_axis",
             "b_axis"
+          ]
+        },
+        {
+          "description": "3D 装配：**转动副**（revolute）——同轴 + 轴向锚点间距锁定，\n消 5 留 1（绕轴转动）。`offset` 为两轴原点沿轴的间距（缺省 0）；\n`drive` 给出关节角目标（弧度，0 = 输入位形处的相对转角，\n即以初始装配为标定零位），施加后关节完全确定。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "a_axis": {
+              "$ref": "#/$defs/Axis3"
+            },
+            "b": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "b_axis": {
+              "$ref": "#/$defs/Axis3"
+            },
+            "drive": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "offset": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "revolute"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a",
+            "b",
+            "a_axis",
+            "b_axis"
+          ]
+        },
+        {
+          "description": "3D 装配：**圆柱副**（cylindrical）——同轴，消 4 留 2\n（沿轴滑动 + 绕轴转动）。等价于 coaxial，语义别名，诊断按关节报告。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "a_axis": {
+              "$ref": "#/$defs/Axis3"
+            },
+            "b": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "b_axis": {
+              "$ref": "#/$defs/Axis3"
+            },
+            "type": {
+              "type": "string",
+              "const": "cylindrical"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a",
+            "b",
+            "a_axis",
+            "b_axis"
+          ]
+        },
+        {
+          "description": "3D 装配：**移动副**（prismatic）——圆柱副 + 姿态滚转锁定，\n消 5 留 1（沿轴平动）。滚转通过一对垂直于轴的参考方向锁定\n（`roll` 为其夹角目标，弧度；参考方向缺省时退化为圆柱副）。\n`drive` 为关节平动目标（沿轴位移，0 = 初始位形处锚点轴向间距）。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "a_axis": {
+              "$ref": "#/$defs/Axis3"
+            },
+            "a_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Vec3"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "b": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "b_axis": {
+              "$ref": "#/$defs/Axis3"
+            },
+            "b_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Vec3"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "drive": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "roll": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "prismatic"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a",
+            "b",
+            "a_axis",
+            "b_axis"
+          ]
+        },
+        {
+          "description": "3D 装配：**球副**（spherical）——两锚点重合，消 3 留 3（姿态自由）。",
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "a_point": {
+              "description": "a 体上的球心锚点（体坐标系）。",
+              "$ref": "#/$defs/Vec3"
+            },
+            "b": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "b_point": {
+              "description": "b 体上的球心锚点（体坐标系）。",
+              "$ref": "#/$defs/Vec3"
+            },
+            "type": {
+              "type": "string",
+              "const": "spherical"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "a",
+            "b",
+            "a_point",
+            "b_point"
+          ]
+        },
+        {
+          "description": "3D 装配：**传动耦合**（齿轮/带轮）——两个已存在的 revolute 关节的\n关节变量按速比联动：`(θ_b − θ_b₀) = ratio · (θ_a − θ_a₀)`（θ₀ 为\n初始位形处的关节变量）。`joint_a`/`joint_b` 是 revolute 约束的 id。",
+          "type": "object",
+          "properties": {
+            "joint_a": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "joint_b": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "ratio": {
+              "description": "速比：θ_b 每随 θ_a 变化 1 弧度变化 ratio 弧度（外啮合为负）。",
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "transmission"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "joint_a",
+            "joint_b",
+            "ratio"
           ]
         }
       ]

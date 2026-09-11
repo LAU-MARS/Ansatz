@@ -73,6 +73,28 @@ pub struct Suggestion {
     pub human_message: String,
 }
 
+/// 关节变量的当前值（按关节约束逐个报告，机器人学的一等公民）。
+///
+/// revolute/cylindrical：绕轴相对转角 θ（弧度，初始位形为 0）；
+/// prismatic：沿轴相对位移 δ（长度，初始位形为 0）。
+/// `drive` 施加后收敛报告中该值即驱动目标。
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
+pub struct JointState {
+    /// 对应的关节约束 id。
+    pub constraint_id: u32,
+    /// "revolute" | "cylindrical" | "prismatic"
+    pub joint_kind: String,
+    /// 当前关节变量（弧度或长度，以初始位形为零点）。
+    pub value: f64,
+    pub human_message: String,
+}
+
 /// 结构化诊断。
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -94,6 +116,8 @@ pub struct Diagnostics {
     pub max_residual: Option<ConstraintResidual>,
     /// 机器可读的修复建议。
     pub suggestions: Vec<Suggestion>,
+    /// 关节变量状态（revolute/cylindrical/prismatic 各报一条）。
+    pub joints: Vec<JointState>,
     /// 雅可比条件数估计：`κ(J) = σ_max/σ_min`。
     /// 骨架阶段对单条归一化约束行精确为 `1.0`；行退化（原点处梯度为零）
     /// 或秩亏（重复约束）时无意义，为 `None`。通用求解器接入后替换为真实估计。

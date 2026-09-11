@@ -44,7 +44,14 @@ pub fn solve(model: &Model) -> Result<SolveReport, SolveError> {
     // 1. 收集受支持的约束：Point2 到原点的距离，按目标点分组。
     let mut groups: BTreeMap<EntityId, Vec<(u32, f64)>> = BTreeMap::new();
     for constraint in &model.constraints {
-        let ConstraintKind::Distance { a, b, value } = &constraint.kind else {
+        let ConstraintKind::Distance {
+            a,
+            b,
+            value,
+            a_anchor,
+            b_anchor,
+        } = &constraint.kind
+        else {
             return Err(SolveError::UnsupportedConstraint {
                 constraint_id: constraint.id,
                 constraint_kind: constraint.kind.kind_name().into(),
@@ -71,6 +78,13 @@ pub fn solve(model: &Model) -> Result<SolveReport, SolveError> {
                 constraint_id: constraint.id,
                 constraint_kind: "distance".into(),
                 reason: String::from("骨架阶段仅支持到原点的距离（b 字段需为 null）。"),
+            });
+        }
+        if a_anchor.is_some() || b_anchor.is_some() {
+            return Err(SolveError::UnsupportedConstraint {
+                constraint_id: constraint.id,
+                constraint_kind: "distance".into(),
+                reason: String::from("锚点（a_anchor/b_anchor）是 3D 装配语义，2D 点不支持。"),
             });
         }
         groups.entry(*a).or_default().push((constraint.id, *value));
@@ -247,6 +261,7 @@ pub fn solve(model: &Model) -> Result<SolveReport, SolveError> {
         diagnostics: Diagnostics {
             dof_total,
             dof_remaining,
+            joints: Vec::new(),
             redundant_constraints: redundant_groups,
             residuals,
             max_residual,

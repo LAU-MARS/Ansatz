@@ -71,7 +71,7 @@ const parseHex = (s) => BigInt(s);
 console.log(`native version() = ${native.version()}`);
 assert.match(native.version(), /^\d+\.\d+\.\d+/);
 
-for (const name of ['case1', 'case2']) {
+for (const name of ['case1', 'case2', 'case3', 'case4']) {
   const model = JSON.parse(readFileSync(path.join(PARITY_DIR, `${name}.model.json`), 'utf8'));
   const expected = JSON.parse(readFileSync(path.join(PARITY_DIR, `${name}.expected.json`), 'utf8'));
 

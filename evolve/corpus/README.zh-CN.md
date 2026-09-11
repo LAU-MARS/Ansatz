@@ -47,3 +47,4 @@ cases/<case-id>/
 | `case-3d-shaft-converged` | 3D 全约束装配（fixed + coaxial + distance + angle）；**LM 迭代解位模式** |
 | `case-3d-mate-underconstrained` | 单 mate 消 3 DOF |
 | `case-3d-conflict-distances` | 刚体距离对冲突（可证明不一致） |
+| `case-3d-driven-arm` | 三连杆臂：fixed + 3×revolute（双驱动）+ 传动耦合；**关节空间驱动位模式** |

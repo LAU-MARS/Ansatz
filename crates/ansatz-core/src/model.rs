@@ -199,11 +199,24 @@ pub enum ConstraintKind {
     Perpendicular { a: EntityId, b: EntityId },
     /// 相切。
     Tangent { a: EntityId, b: EntityId },
-    /// 距离。`b = None` 表示到坐标原点（**骨架阶段唯一受支持的算例**）。
+    /// 距离。2D：`b = None` 表示到坐标原点。3D 装配：a、b 为两个 Rigid3，
+    /// 距离在**锚点**之间测量（体坐标系；缺省为各自原点）。
     Distance {
         a: EntityId,
         b: Option<EntityId>,
         value: f64,
+        /// a 体上的锚点（体坐标系）；缺省 (0,0,0)。
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        a_anchor: Option<Vec3>,
+        /// b 体上的锚点（体坐标系）；缺省 (0,0,0)。
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        b_anchor: Option<Vec3>,
     },
     /// 角度（弧度）。2D：`b = None` 表示相对参考系（未实现）。
     /// 3D 装配：a、b 为两个 Rigid3，`a_dir`/`b_dir` 为各自体坐标系内的参考方向
@@ -251,6 +264,82 @@ pub enum ConstraintKind {
         /// b 体上的轴（体坐标系）。
         b_axis: Axis3,
     },
+    /// 3D 装配：**转动副**（revolute）——同轴 + 轴向锚点间距锁定，
+    /// 消 5 留 1（绕轴转动）。`offset` 为两轴原点沿轴的间距（缺省 0）；
+    /// `drive` 给出关节角目标（弧度，0 = 输入位形处的相对转角，
+    /// 即以初始装配为标定零位），施加后关节完全确定。
+    Revolute {
+        a: EntityId,
+        b: EntityId,
+        a_axis: Axis3,
+        b_axis: Axis3,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        offset: Option<f64>,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        drive: Option<f64>,
+    },
+    /// 3D 装配：**圆柱副**（cylindrical）——同轴，消 4 留 2
+    /// （沿轴滑动 + 绕轴转动）。等价于 coaxial，语义别名，诊断按关节报告。
+    Cylindrical {
+        a: EntityId,
+        b: EntityId,
+        a_axis: Axis3,
+        b_axis: Axis3,
+    },
+    /// 3D 装配：**移动副**（prismatic）——圆柱副 + 姿态滚转锁定，
+    /// 消 5 留 1（沿轴平动）。滚转通过一对垂直于轴的参考方向锁定
+    /// （`roll` 为其夹角目标，弧度；参考方向缺省时退化为圆柱副）。
+    /// `drive` 为关节平动目标（沿轴位移，0 = 初始位形处锚点轴向间距）。
+    Prismatic {
+        a: EntityId,
+        b: EntityId,
+        a_axis: Axis3,
+        b_axis: Axis3,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        a_ref: Option<Vec3>,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        b_ref: Option<Vec3>,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        roll: Option<f64>,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        drive: Option<f64>,
+    },
+    /// 3D 装配：**球副**（spherical）——两锚点重合，消 3 留 3（姿态自由）。
+    Spherical {
+        a: EntityId,
+        b: EntityId,
+        /// a 体上的球心锚点（体坐标系）。
+        a_point: Vec3,
+        /// b 体上的球心锚点（体坐标系）。
+        b_point: Vec3,
+    },
+    /// 3D 装配：**传动耦合**（齿轮/带轮）——两个已存在的 revolute 关节的
+    /// 关节变量按速比联动：`(θ_b − θ_b₀) = ratio · (θ_a − θ_a₀)`（θ₀ 为
+    /// 初始位形处的关节变量）。`joint_a`/`joint_b` 是 revolute 约束的 id。
+    Transmission {
+        joint_a: u32,
+        joint_b: u32,
+        /// 速比：θ_b 每随 θ_a 变化 1 弧度变化 ratio 弧度（外啮合为负）。
+        ratio: f64,
+    },
 }
 
 impl ConstraintKind {
@@ -268,6 +357,11 @@ impl ConstraintKind {
             ConstraintKind::Fixed { .. } => "fixed",
             ConstraintKind::Mate { .. } => "mate",
             ConstraintKind::Coaxial { .. } => "coaxial",
+            ConstraintKind::Revolute { .. } => "revolute",
+            ConstraintKind::Cylindrical { .. } => "cylindrical",
+            ConstraintKind::Prismatic { .. } => "prismatic",
+            ConstraintKind::Spherical { .. } => "spherical",
+            ConstraintKind::Transmission { .. } => "transmission",
         }
     }
 }
