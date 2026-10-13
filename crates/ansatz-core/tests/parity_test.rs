@@ -1,10 +1,14 @@
-//! 位级一致性（bit-level parity）测试框架。
+//! 跨平台位级一致性（bit-level parity）测试。
 //!
-//! 对固定的输入算例，断言输出的 f64 数值与 `tests/parity/*.expected.json`
-//! 中提交的**十六进制位模式**完全相同（不是 epsilon 比较）。同一份测试在
-//! CI 的 x86-64-linux / aarch64-darwin / x86-64-windows 上原位运行，
-//! wasm32 上由 `ansatz-wasm/smoke/node.mjs` 用同一份期望文件做同样断言，
-//! 从而覆盖「同一输入、逐位相同」的跨架构承诺。
+//! 承诺的范围是：**同一版本、同一输入，在所有目标上逐位相同**。对固定的
+//! 输入算例，断言输出的 f64 与 `tests/parity/*.expected.json` 中的十六进制
+//! 位模式完全相同。同一份测试在 CI 的 x86-64-linux / aarch64-darwin /
+//! x86-64-windows 上原位运行，wasm32 与 node 原生壳由冒烟脚本用同一份期望
+//! 文件做同样断言。
+//!
+//! 这些位模式**不是**行为契约：求解器的数值改进（迭代策略、分解库升级）
+//! 会合法地改变它们，届时重新生成即可。行为正确性由其余测试与 evolve
+//! 语料按容差断言。
 //!
 //! 期望文件中数值一律写成 "0x…" 字符串，避免 JSON 浮点序列化本身引入歧义。
 
@@ -32,7 +36,7 @@ fn run_case(name: &str) -> serde_json::Value {
     .unwrap();
 
     let model: Model = serde_json::from_str(&model_json).unwrap();
-    let report = solve(&model).expect("parity 用例必须是受支持的平凡算例");
+    let report = solve(&model).expect("parity 用例必须是受支持的模型");
     let got = serde_json::to_value(&report).expect("报告可序列化");
 
     assert_eq!(got["outcome"], expected["outcome"], "{name}: outcome");
@@ -119,21 +123,35 @@ fn run_case(name: &str) -> serde_json::Value {
         .expect("parity 用例条件数非空");
     assert_bits(name, "cond", got_cond, want_cond);
 
+    // Every scalar residual and joint value is part of the numerical output.
+    for field in ["residuals", "joints"] {
+        let actual = got["diagnostics"][field].as_array().unwrap();
+        let want = expected[field].as_array().unwrap();
+        assert_eq!(actual.len(), want.len(), "{name}: {field} length");
+        let value = if field == "joints" {
+            "value"
+        } else {
+            "residual"
+        };
+        for (g, w) in actual.iter().zip(want) {
+            assert_eq!(g["constraint_id"], w["constraint_id"]);
+            assert_bits(
+                name,
+                field,
+                g[value].as_f64().unwrap(),
+                w[value].as_str().unwrap(),
+            );
+        }
+    }
+    let mut replay = model;
+    replay.entities = report.entities.clone();
+    assert_eq!(
+        serde_json::to_value(solve(&replay).unwrap()).unwrap()["entities"],
+        got["entities"],
+        "{name}: solving a solution preserves its serialized numeric bits"
+    );
+
     got
-}
-
-#[test]
-fn parity_case1_exact_rational() {
-    // 3-4-5 三角形缩放：闭式解精确可表示，残差恰为 0。
-    let got = run_case("case1");
-    assert_eq!(got["outcome"], "underconstrained");
-}
-
-#[test]
-fn parity_case2_irrational_sqrt_path() {
-    // (1,1) 归一化：走真实 sqrt/除法 的非精确路径，是跨架构逐位一致性的真金火检验。
-    let got = run_case("case2");
-    assert_eq!(got["outcome"], "underconstrained");
 }
 
 #[test]
@@ -155,4 +173,14 @@ fn parity_case4_driven_arm_with_transmission() {
         Some(3),
         "三个关节各报一条状态"
     );
+}
+
+#[test]
+fn parity_case5_irrational_2d_projection() {
+    run_case("case5");
+}
+
+#[test]
+fn parity_case6_zero_roll_at_equivalent_full_turn_pose() {
+    run_case("case6");
 }

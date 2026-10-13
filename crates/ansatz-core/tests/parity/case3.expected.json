@@ -4,11 +4,44 @@
   "dof_total": 12,
   "dof_remaining": 0,
   "entities": [
-    { "id": 1, "pose": { "tx": "0x0000000000000000", "ty": "0x0000000000000000", "tz": "0x0000000000000000",
-                          "rx": "0x0000000000000000", "ry": "0x0000000000000000", "rz": "0x0000000000000000" } },
-    { "id": 2, "pose": { "tx": "0xBFB1D4C0C54DFE02", "ty": "0xBFC166BE27E77C7D", "tz": "0x3FFFE8125C41A4D1",
-                          "rx": "0x3FC91FA45A6EF51A", "ry": "0xBFB96EDC01A1C38A", "rz": "0xBF840C83A508E8EF" } }
+    {
+      "id": 1,
+      "pose": {
+        "tx": "0x0000000000000000",
+        "ty": "0x0000000000000000",
+        "tz": "0x0000000000000000",
+        "rx": "0x0000000000000000",
+        "ry": "0x0000000000000000",
+        "rz": "0x0000000000000000"
+      }
+    },
+    {
+      "id": 2,
+      "pose": {
+        "tx": "0xBFB1D4C0C54A2CC7",
+        "ty": "0xBFC166BE27E9831B",
+        "tz": "0x3FFFE8125C41A246",
+        "rx": "0x3FC91FA45A6FE951",
+        "ry": "0xBFB96EDC019FF30A",
+        "rz": "0xBF840C83A5049D5F"
+      }
+    }
   ],
-  "max_residual_abs": "0x3D7C2E0000000000",
-  "jacobian_condition_estimate": "0x4017AE774755A208"
+  "max_residual_abs": "0x3D8D236000000000",
+  "jacobian_condition_estimate": "0x40119179D9BEB438",
+  "residuals": [
+    {
+      "constraint_id": 1,
+      "residual": "0x3D8D236000000000"
+    },
+    {
+      "constraint_id": 2,
+      "residual": "0x3D56600000000000"
+    },
+    {
+      "constraint_id": 3,
+      "residual": "0x3D651A0000000000"
+    }
+  ],
+  "joints": []
 }

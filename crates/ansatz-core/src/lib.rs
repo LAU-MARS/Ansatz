@@ -12,16 +12,17 @@
 //!   x86-64 / aarch64 / wasm32 上逐位一致（见根 Cargo.toml 的 profile 注释
 //!   与 `tests/parity` 位模式测试框架）。
 //! - **结构化诊断是一等公民**：求解结果不只回答「解出来了没有」，
-//!   还要回答「为什么没解出来」——自由度计数、冗余/冲突约束组、每条约束的
+//!   还要回答「为什么没解出来」——自由度计数、冲突组与冗余组、每条约束的
 //!   残差、机器可读的修复建议，且每条诊断都带同时面向人类与 LLM 的
 //!   `human_message`。
+//! - **求解是位姿的纯函数**：把求解结果原样再解一次得到同一结果
+//!   （关节零位由几何定义，不依赖「本次输入」的位形）。
 //!
-//! ## 当前阶段（骨架）
+//! ## 求解路径
 //!
-//! [`solver::solve`] 只处理一个平凡算例：**2D 点 + 到原点的距离约束**，
-//! 使用闭式解 `p' = p · (d / ‖p‖)`，不包含通用 Newton 迭代。它的职责是让
-//! 端到端管线（cli / ffi / wasm / node / schema / CI）全部以真实形态跑通；
-//! 通用数值求解属于后续阶段，届时只替换 `solver` 模块。
+//! [`solver::solve`] 按模型分流：含 rigid3 实体的走 [`assembly`]
+//! （Levenberg–Marquardt + 局部 SO(3) 增量 + 尺度均衡的 SVD 秩分析）；纯 2D 模型目前只支持
+//! 「点到原点的距离」，用闭式解 `p' = p · (d / ‖p‖)`。
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -40,8 +41,8 @@ pub use model::{
     SolveOutcome, SolveParams, Vec3,
 };
 pub use report::{
-    Action, ConstraintResidual, Diagnostics, Envelope, ErrorPayload, RedundancyGroup, SolveError,
-    SolveReport, Suggestion,
+    Action, ConstraintGroup, ConstraintResidual, Diagnostics, Envelope, ErrorPayload, JointState,
+    SolveError, SolveReport, Suggestion,
 };
 pub use solver::solve;
 

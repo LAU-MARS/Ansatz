@@ -1,9 +1,10 @@
 {
-  "description": "负距离：几何上不可能满足；特解按 d_ref=-3 缩放到 (-3,-0)：注意 0.0*(-3.0) 依 IEEE 754 产生负零（0x8000000000000000），黄金集忠实记录该位模式",
+  "description": "负距离：几何上不可能满足；inconsistent + 单约束冲突组 + relax 建议；特解取原点而非负半径",
   "outcome": "inconsistent",
   "dof_total": 2,
   "dof_remaining": 1,
-  "entities": [ { "id": 1, "x": "0xC008000000000000", "y": "0x8000000000000000" } ],
-  "redundant_constraint_ids": [[7]],
+  "entities": [ { "id": 1, "x": 0.0, "y": 0.0 } ],
+  "conflict_constraint_ids": [[7]],
+  "redundant_constraint_ids": [],
   "suggestion_actions": ["relax_constraint:7"]
 }

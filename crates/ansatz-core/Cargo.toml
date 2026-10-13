@@ -27,4 +27,4 @@ schemars = { workspace = true, optional = true }
 [dev-dependencies]
 # 自引用 dev 依赖：让 `cargo test -p ansatz-core` 单独运行时也带上 serde feature。
 ansatz-core = { path = ".", features = ["serde"] }
-serde_json = "1"
+serde_json = { workspace = true }

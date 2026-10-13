@@ -8,7 +8,7 @@
       "$ref": "#/$defs/Diagnostics"
     },
     "entities": {
-      "description": "求解后的实体（欠约束且不允许接受特解时，原样返回输入实体）。",
+      "description": "求解后的实体。欠约束时是解集中的一个特解。",
       "type": "array",
       "items": {
         "$ref": "#/$defs/Entity"
@@ -25,6 +25,29 @@
     "diagnostics"
   ],
   "$defs": {
+    "ConstraintGroup": {
+      "description": "一组相互牵连的约束。出现在两个位置，含义不同：\n\n- `Diagnostics::conflicts`：组内约束不可能同时满足；\n- `Diagnostics::redundant_constraints`：组内约束相互一致但线性相关，\n  在当前位形的线性化中不增加秩；删除后须重新验证几何行为。",
+      "type": "object",
+      "properties": {
+        "constraint_ids": {
+          "description": "组内约束 id（按模型中的顺序）。",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "human_message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "constraint_ids",
+        "human_message"
+      ]
+    },
     "ConstraintResidual": {
       "description": "单条约束在返回解（或特解）处的残差。",
       "type": "object",
@@ -54,8 +77,15 @@
       "description": "结构化诊断。",
       "type": "object",
       "properties": {
+        "conflicts": {
+          "description": "冲突组：组内约束不可能同时满足。非空 ⇔ 结局为 `Inconsistent`。",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConstraintGroup"
+          }
+        },
         "dof_remaining": {
-          "description": "求解后剩余自由度（骨架阶段为通用计数近似，见 solver 模块注释）。",
+          "description": "返回位形处的剩余自由度：自由参数数 − rank(J)。",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -66,8 +96,14 @@
           "format": "uint32",
           "minimum": 0
         },
+        "iterations": {
+          "description": "实际执行的迭代数（2D 闭式路径恒为 0）。",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
         "jacobian_condition_estimate": {
-          "description": "雅可比条件数估计：`κ(J) = σ_max/σ_min`。\n骨架阶段对单条归一化约束行精确为 `1.0`；行退化（原点处梯度为零）\n或秩亏（重复约束）时无意义，为 `None`。通用求解器接入后替换为真实估计。",
+          "description": "雅可比条件数估计：`κ(J) = σ_max / σ_min(非零)`。\n3D 取自局部旋转切空间、平移/旋转三元组尺度均衡后的终态雅可比；\n这是均衡矩阵的非零谱条件数，不能代表原始物理单位下的条件数。\n2D 闭式路径对单条约束精确为 `1.0`，\n行退化（原点处梯度为零）或重复约束时为 `None`。",
           "type": [
             "number",
             "null"
@@ -93,10 +129,10 @@
           ]
         },
         "redundant_constraints": {
-          "description": "冗余/冲突约束组。",
+          "description": "冗余组：组内约束一致但线性相关（与约束书写顺序无关）。",
           "type": "array",
           "items": {
-            "$ref": "#/$defs/RedundancyGroup"
+            "$ref": "#/$defs/ConstraintGroup"
           }
         },
         "residuals": {
@@ -118,6 +154,8 @@
       "required": [
         "dof_total",
         "dof_remaining",
+        "iterations",
+        "conflicts",
         "redundant_constraints",
         "residuals",
         "suggestions",
@@ -144,7 +182,7 @@
       ]
     },
     "Geometry": {
-      "description": "几何实体。每个变体自带全部几何参数（骨架阶段不做参数共享/引用式建模）。",
+      "description": "几何实体。每个变体自带全部几何参数（不做参数共享/引用式建模）。",
       "oneOf": [
         {
           "description": "平面上的点（2 DOF）。",
@@ -269,7 +307,7 @@
       ]
     },
     "JointState": {
-      "description": "关节变量的当前值（按关节约束逐个报告，机器人学的一等公民）。\n\nrevolute/cylindrical：绕轴相对转角 θ（弧度，初始位形为 0）；\nprismatic：沿轴相对位移 δ（长度，初始位形为 0）。\n`drive` 施加后收敛报告中该值即驱动目标。",
+      "description": "关节变量的当前值（按关节约束逐个报告，机器人学的一等公民）。\n\nrevolute/cylindrical：绕轴转角 θ（弧度，主值 (−π, π]，零位由\n`a_ref`/`b_ref` 定义）；prismatic：沿轴位移 δ（长度）。两者都只依赖\n返回的位姿，`drive` 收敛后该值即驱动目标。",
       "type": "object",
       "properties": {
         "constraint_id": {
@@ -286,7 +324,7 @@
           "type": "string"
         },
         "value": {
-          "description": "当前关节变量（弧度或长度，以初始位形为零点）。",
+          "description": "当前关节变量（弧度或长度），只由返回的位姿决定。",
           "type": "number",
           "format": "double"
         }
@@ -335,31 +373,8 @@
         "rotation"
       ]
     },
-    "RedundancyGroup": {
-      "description": "约束冗余/冲突组：这些约束在当前雅可比下线性相关。\n\n- 线性相关但相互**一致** → 冗余（删除任何一条不改变解集）；\n- 线性相关且相互**矛盾** → 冲突（见 `Inconsistent` 结局）。\n\n具体是哪种情形由 `human_message` 说明。",
-      "type": "object",
-      "properties": {
-        "constraint_ids": {
-          "description": "组内互相冲突/重复的约束 id。",
-          "type": "array",
-          "items": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "human_message": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "constraint_ids",
-        "human_message"
-      ]
-    },
     "Rotation3": {
-      "description": "3D 旋转的参数化：**指数映射（旋转向量）** `v = θ·û`。\n\n# 为什么选指数映射而不是四元数\n\n- 四元数是 4 参数表示 3 个自由度，求解时必须额外引入单位范数约束，\n  等于给系统加了一个非线性方程；且其雅可比存在冗余列，牛顿类求解器\n  的法方程矩阵 `JᵀJ` 必然奇异，需要额外的流形投影/正交化处理。\n- 指数映射是**最小参数化**（3 参数 ↔ 3 自由度）：无冗余列、无额外约束，\n  `θ → 0` 时 `v → 0` 连续，没有四元数的 ±q 双重覆盖问题，也没有\n  欧拉角的万向锁。\n\n# 切换抽象点\n\n本类型是旋转参数化的唯一入口：求解器只经由 `Rotation3`（及其未来的\n切空间/雅可比接口）访问旋转，不直接触碰内部表示。若后续需要换成\n四元数 + 流形投影等表示，只需替换本结构体与对应的导数实现，\n数据模型其余部分不动。",
+      "description": "3D 旋转的参数化：**指数映射（旋转向量）** `v = θ·û`。\n\nJSON 使用紧凑的三维旋转向量。它是姿态存储格式，并非全局无奇异\n的求解坐标：2π 等位置的全局参数雅可比会退化。\n求解内部采用三维 SO(3) 局部增量并复合旋转，DOF 分析也使用该切空间。\n四元数存储配合三维局部增量同样无需添加单位范数约束。\n\n# 切换抽象点\n\n本类型是旋转参数化的唯一入口：求解器只经由 `Rotation3`（及其未来的\n切空间/雅可比接口）访问旋转，不直接触碰内部表示。若后续需要换成\n四元数 + 流形投影等表示，只需替换本结构体与对应的导数实现，\n数据模型其余部分不动。",
       "type": "object",
       "properties": {
         "vector": {
@@ -379,7 +394,7 @@
       ]
     },
     "SolveOutcome": {
-      "description": "求解结局。这是**求解层**的结果（区别于工具层错误 [`crate::SolveError`]）。",
+      "description": "求解结局：只回答「返回的位形是否满足全部约束」。这是**求解层**的结果\n（区别于工具层错误 [`crate::SolveError`]）。\n\n欠约束（`diagnostics.dof_remaining > 0`）与冗余\n（`diagnostics.redundant_constraints` 非空）是与结局正交的事实，\n不折叠进本枚举：一个完美满足但仍可拖动的草图就是 `Converged`。",
       "oneOf": [
         {
           "description": "在容差内满足全部约束。",
@@ -387,24 +402,14 @@
           "const": "converged"
         },
         {
-          "description": "约束一致但自由度未耗尽（附特解或原样返回，取决于参数）。",
-          "type": "string",
-          "const": "underconstrained"
-        },
-        {
-          "description": "约束一致但存在冗余（线性相关），解集仍可能非空。",
-          "type": "string",
-          "const": "overconstrained"
-        },
-        {
-          "description": "约束互相冲突，无解（附冲突组与修复建议）。",
+          "description": "约束互相冲突：`diagnostics.conflicts` 给出冲突组与修复建议。",
           "type": "string",
           "const": "inconsistent"
         },
         {
-          "description": "达到最大迭代数仍未收敛（骨架阶段不会出现，保留为契约的一部分）。",
+          "description": "未收敛，且未能证明冲突（迭代上限、退化初值或非线性停滞）。",
           "type": "string",
-          "const": "max_iterations"
+          "const": "not_converged"
         }
       ]
     },

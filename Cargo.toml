@@ -3,14 +3,14 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "MIT"
 authors = ["Ansatz contributors"]
 rust-version = "1.78"
 
 [workspace.dependencies]
-ansatz-core = { path = "crates/ansatz-core", version = "0.3.0" }
+ansatz-core = { path = "crates/ansatz-core", version = "0.4.0" }
 libm = "0.2"
 # nalgebra：纯 Rust 线性代数（无 BLAS/平台分发），no_std 经 libm feature，
 # 跨平台位级一致的前提全部满足。core 只用它的静态 3×3 与 SVD，

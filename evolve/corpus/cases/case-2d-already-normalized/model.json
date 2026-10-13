@@ -1,0 +1,23 @@
+{
+  "entities": [
+    {
+      "id": 1,
+      "geometry": {
+        "type": "point2",
+        "x": 0.7071067811865475,
+        "y": 0.7071067811865475
+      }
+    }
+  ],
+  "constraints": [
+    {
+      "id": 1,
+      "kind": {
+        "type": "distance",
+        "a": 1,
+        "b": null,
+        "value": 1
+      }
+    }
+  ]
+}

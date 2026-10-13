@@ -8,12 +8,11 @@ use crate::model::{Entity, EntityId, SolveOutcome};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-/// 约束冗余/冲突组：这些约束在当前雅可比下线性相关。
+/// 一组相互牵连的约束。出现在两个位置，含义不同：
 ///
-/// - 线性相关但相互**一致** → 冗余（删除任何一条不改变解集）；
-/// - 线性相关且相互**矛盾** → 冲突（见 `Inconsistent` 结局）。
-///
-/// 具体是哪种情形由 `human_message` 说明。
+/// - `Diagnostics::conflicts`：组内约束不可能同时满足；
+/// - `Diagnostics::redundant_constraints`：组内约束相互一致但线性相关，
+///   在当前位形的线性化中不增加秩；删除后须重新验证几何行为。
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
@@ -21,8 +20,8 @@ use alloc::vec::Vec;
     derive(serde::Serialize, serde::Deserialize),
     serde(deny_unknown_fields)
 )]
-pub struct RedundancyGroup {
-    /// 组内互相冲突/重复的约束 id。
+pub struct ConstraintGroup {
+    /// 组内约束 id（按模型中的顺序）。
     pub constraint_ids: Vec<u32>,
     pub human_message: String,
 }
@@ -75,9 +74,9 @@ pub struct Suggestion {
 
 /// 关节变量的当前值（按关节约束逐个报告，机器人学的一等公民）。
 ///
-/// revolute/cylindrical：绕轴相对转角 θ（弧度，初始位形为 0）；
-/// prismatic：沿轴相对位移 δ（长度，初始位形为 0）。
-/// `drive` 施加后收敛报告中该值即驱动目标。
+/// revolute/cylindrical：绕轴转角 θ（弧度，主值 (−π, π]，零位由
+/// `a_ref`/`b_ref` 定义）；prismatic：沿轴位移 δ（长度）。两者都只依赖
+/// 返回的位姿，`drive` 收敛后该值即驱动目标。
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
@@ -90,7 +89,7 @@ pub struct JointState {
     pub constraint_id: u32,
     /// "revolute" | "cylindrical" | "prismatic"
     pub joint_kind: String,
-    /// 当前关节变量（弧度或长度，以初始位形为零点）。
+    /// 当前关节变量（弧度或长度），只由返回的位姿决定。
     pub value: f64,
     pub human_message: String,
 }
@@ -106,10 +105,14 @@ pub struct JointState {
 pub struct Diagnostics {
     /// 模型总自由度（各实体参数数之和）。
     pub dof_total: u32,
-    /// 求解后剩余自由度（骨架阶段为通用计数近似，见 solver 模块注释）。
+    /// 返回位形处的剩余自由度：自由参数数 − rank(J)。
     pub dof_remaining: u32,
-    /// 冗余/冲突约束组。
-    pub redundant_constraints: Vec<RedundancyGroup>,
+    /// 实际执行的迭代数（2D 闭式路径恒为 0）。
+    pub iterations: u32,
+    /// 冲突组：组内约束不可能同时满足。非空 ⇔ 结局为 `Inconsistent`。
+    pub conflicts: Vec<ConstraintGroup>,
+    /// 冗余组：组内约束一致但线性相关（与约束书写顺序无关）。
+    pub redundant_constraints: Vec<ConstraintGroup>,
     /// 每条约束在返回解处的残差。
     pub residuals: Vec<ConstraintResidual>,
     /// 残差绝对值最大的那条约束。
@@ -118,9 +121,11 @@ pub struct Diagnostics {
     pub suggestions: Vec<Suggestion>,
     /// 关节变量状态（revolute/cylindrical/prismatic 各报一条）。
     pub joints: Vec<JointState>,
-    /// 雅可比条件数估计：`κ(J) = σ_max/σ_min`。
-    /// 骨架阶段对单条归一化约束行精确为 `1.0`；行退化（原点处梯度为零）
-    /// 或秩亏（重复约束）时无意义，为 `None`。通用求解器接入后替换为真实估计。
+    /// 雅可比条件数估计：`κ(J) = σ_max / σ_min(非零)`。
+    /// 3D 取自局部旋转切空间、平移/旋转三元组尺度均衡后的终态雅可比；
+    /// 这是均衡矩阵的非零谱条件数，不能代表原始物理单位下的条件数。
+    /// 2D 闭式路径对单条约束精确为 `1.0`，
+    /// 行退化（原点处梯度为零）或重复约束时为 `None`。
     pub jacobian_condition_estimate: Option<f64>,
 }
 
@@ -134,7 +139,7 @@ pub struct Diagnostics {
 )]
 pub struct SolveReport {
     pub outcome: SolveOutcome,
-    /// 求解后的实体（欠约束且不允许接受特解时，原样返回输入实体）。
+    /// 求解后的实体。欠约束时是解集中的一个特解。
     pub entities: Vec<Entity>,
     pub diagnostics: Diagnostics,
 }
@@ -205,8 +210,9 @@ impl core::fmt::Display for SolveError {
 
 /// 外壳错误信封的负载：`{ kind, message }`。
 /// kind 取值：`unknown_entity` / `unsupported_constraint` / `invalid_model`
-/// （来自 [`SolveError``），以及外壳自产的 `invalid_json` / `invalid_utf8` /
-/// `invalid_argument` / `panic` 等。
+/// （来自 [`SolveError`]，输入已按 schema 解析成功但语义无效），以及外壳自产的
+/// `invalid_json`（输入无法按模型 schema 解析，字符串与结构化 API 一致）/
+/// `invalid_utf8` / `invalid_argument` / `panic` 等。
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(

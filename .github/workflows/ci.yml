@@ -115,7 +115,8 @@ jobs:
         run: |
           cargo fmt --all -- --check
           cargo clippy --workspace --all-targets -- -D warnings
-      - name: 黄金语料评测（7/7 必须全过）
+          cargo test --workspace
+      - name: 黄金语料评测（全部 case 必须通过，含两次运行的确定性检查）
         working-directory: evolve
         run: >
           cargo run --release -q -p ansatz-eval

@@ -1,0 +1,16 @@
+{
+  "description": "非精确归一化后的点已经在容差内：回灌保留坐标（逐位幂等另由核心回归断言）",
+  "outcome": "converged",
+  "dof_total": 2,
+  "dof_remaining": 1,
+  "conflict_constraint_ids": [],
+  "redundant_constraint_ids": [],
+  "entities": [
+    {
+      "id": 1,
+      "x": 0.7071067811865475,
+      "y": 0.7071067811865475
+    }
+  ],
+  "value_tolerance": 1e-15
+}

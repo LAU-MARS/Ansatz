@@ -1,0 +1,13 @@
+{
+  "entities": [
+    {"id": 1, "geometry": {"type": "rigid3", "pose": {"translation": {"x": 0.0, "y": 0.0, "z": 0.0}, "rotation": {"vector": [0.0, 0.0, 0.0]}}}},
+    {"id": 2, "geometry": {"type": "rigid3", "pose": {"translation": {"x": 0.0, "y": 0.0, "z": 0.0}, "rotation": {"vector": [0.0, 0.0, 6.283185307179586]}}}}
+  ],
+  "constraints": [
+    {"id": 90, "kind": {"type": "fixed", "a": 1}},
+    {"id": 1, "kind": {"type": "prismatic", "a": 1, "b": 2,
+      "a_axis": {"origin": {"x": 0.0, "y": 0.0, "z": 0.0}, "direction": {"x": 0.0, "y": 0.0, "z": 1.0}},
+      "b_axis": {"origin": {"x": 0.0, "y": 0.0, "z": 0.0}, "direction": {"x": 0.0, "y": 0.0, "z": 1.0}},
+      "drive": 0.0}}
+  ]
+}

@@ -49,16 +49,29 @@ fn inconsistent_still_prints_full_diagnostics_and_exits_nonzero() {
     assert_eq!(report["outcome"], "inconsistent");
     let diag = &report["diagnostics"];
     assert_eq!(
-        diag["redundant_constraints"][0]["constraint_ids"],
+        diag["conflicts"][0]["constraint_ids"],
         serde_json::json!([1, 2])
     );
     assert_eq!(diag["residuals"].as_array().unwrap().len(), 2);
     assert_eq!(diag["max_residual"]["residual"].as_f64().unwrap(), 2.0);
     assert!(!diag["suggestions"].as_array().unwrap().is_empty());
-    assert!(diag["redundant_constraints"][0]["human_message"]
+    assert!(diag["conflicts"][0]["human_message"]
         .as_str()
         .unwrap()
         .contains("不一致"));
+}
+
+#[test]
+fn underconstrained_but_satisfied_exits_zero() {
+    // 欠约束不是失败：约束满足即 exit 0，剩余自由度在诊断里
+    let model = r#"{
+        "entities":[{"id":1,"geometry":{"type":"point2","x":3.0,"y":4.0}}],
+        "constraints":[{"id":1,"kind":{"type":"distance","a":1,"b":null,"value":10.0}}]}"#;
+    let (code, stdout, _) = run_cli(model);
+    assert_eq!(code, 0);
+    let report: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(report["outcome"], "converged");
+    assert_eq!(report["diagnostics"]["dof_remaining"], 1);
 }
 
 #[test]

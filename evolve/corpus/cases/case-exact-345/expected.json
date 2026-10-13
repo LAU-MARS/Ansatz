@@ -1,9 +1,10 @@
 {
-  "description": "3-4-5 缩放：闭式解 (6,8) 精确可表示，残差恰为 0",
-  "outcome": "underconstrained",
+  "description": "3-4-5 缩放：闭式解 (6,8)；约束满足即 converged，剩余 1 个自由度见诊断",
+  "outcome": "converged",
   "dof_total": 2,
   "dof_remaining": 1,
-  "entities": [ { "id": 1, "x": "0x4018000000000000", "y": "0x4020000000000000" } ],
+  "entities": [ { "id": 1, "x": 6.0, "y": 8.0 } ],
+  "conflict_constraint_ids": [],
   "redundant_constraint_ids": [],
   "suggestion_actions": ["add_constraint:1"]
 }

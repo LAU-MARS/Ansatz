@@ -1,5 +1,5 @@
 // Node 冒烟测试：加载 wasm-pack --target nodejs 产物（pkg-node），
-// 对 core tests/parity 的两个固定算例做「位级一致性」断言——
+// 对 core tests/parity 下的全部算例做「位级一致性」断言——
 // 与 Rust 测试用的是同一份期望文件（十六进制位模式，非 epsilon 比较）。
 //
 // 运行前提：
@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -34,7 +34,13 @@ const parseHex = (s) => BigInt(s);
 
 console.log(`wasm version() = ${wasm.version()}`);
 
-for (const name of ['case1', 'case2', 'case3', 'case4']) {
+const cases = readdirSync(PARITY_DIR)
+  .filter((f) => f.endsWith('.model.json'))
+  .map((f) => f.slice(0, -'.model.json'.length))
+  .sort();
+assert.ok(cases.length > 0, 'parity 目录下至少要有一个算例');
+
+for (const name of cases) {
   const model = JSON.parse(readFileSync(path.join(PARITY_DIR, `${name}.model.json`), 'utf8'));
   const expected = JSON.parse(readFileSync(path.join(PARITY_DIR, `${name}.expected.json`), 'utf8'));
 
@@ -71,10 +77,19 @@ for (const name of ['case1', 'case2', 'case3', 'case4']) {
     parseHex(expected.jacobian_condition_estimate),
     `${name}.cond`
   );
+  for (const field of ['residuals', 'joints']) {
+    const value = field === 'joints' ? 'value' : 'residual';
+    assert.equal(diag[field].length, expected[field].length);
+    diag[field].forEach((entry, i) => {
+      assert.equal(entry.constraint_id, expected[field][i].constraint_id);
+      assert.equal(bitsOf(entry[value]), parseHex(expected[field][i][value]), `${name}.${field}[${i}]`);
+    });
+  }
 
   // 3) 结构化 API（serde-wasm-bindgen 路径）与字符串 API 结果一致
   const structured = wasm.solve(model);
   assert.equal(structured.ok, true);
+  assert.deepEqual(structured, envelope, `${name}: complete structured/JSON envelope parity`);
   assert.equal(structured.result.outcome, expected.outcome);
   const sg = structured.result.entities[0].geometry;
   const wg = expected.entities[0];
@@ -103,8 +118,13 @@ const conflict = wasm.solve({
 });
 assert.equal(conflict.ok, true); // 求解层结论
 assert.equal(conflict.result.outcome, 'inconsistent');
-assert.deepEqual(conflict.result.diagnostics.redundant_constraints[0].constraint_ids, [1, 2]);
+assert.deepEqual(conflict.result.diagnostics.conflicts[0].constraint_ids, [1, 2]);
 assert.ok(conflict.result.diagnostics.suggestions.length > 0);
+
+// 结构化 API 的 schema 不符与字符串 API 报同一个 kind
+const shapeless = wasm.solve({ entities: 'nope', constraints: [] });
+assert.equal(shapeless.ok, false);
+assert.equal(shapeless.error.kind, 'invalid_json');
 
 console.log('error paths: ok=false(invalid_json) / inconsistent-with-diagnostics');
 console.log('wasm smoke: ALL PASS');

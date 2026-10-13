@@ -36,7 +36,7 @@ fn anchored_distance_measures_between_anchors() {
         fixed(1)
     );
     let r = solve(&model(&json)).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained);
+    assert_eq!(r.outcome, SolveOutcome::Converged);
     let mr = r.diagnostics.max_residual.as_ref().unwrap();
     assert!(mr.residual.abs() <= 1e-9, "初始位形即满足：{mr:?}");
 
@@ -55,10 +55,17 @@ fn anchored_distance_measures_between_anchors() {
         ansatz_core::Geometry::Rigid3 { pose } => pose,
         _ => panic!(),
     };
-    let ax = pose.translation.x + 0.1; // 单位旋转下锚点 = t + anchor
-    let az = pose.translation.z + 0.2;
+    // An under-constrained solution may also rotate the body. Measure the
+    // returned world anchor rather than assuming its orientation stayed zero.
+    let anchor = ansatz_core::so3::mat3_mul_vec(
+        &ansatz_core::so3::rotation(pose.rotation.vector),
+        [0.1, 0.0, 0.2],
+    );
+    let ax = pose.translation.x + anchor[0];
+    let ay = pose.translation.y + anchor[1];
+    let az = pose.translation.z + anchor[2];
     assert!(
-        (ax * ax + az * az).sqrt() - 2.0 < 1e-8,
+        ((ax * ax + ay * ay + az * az).sqrt() - 2.0).abs() < 1e-8,
         "锚点应落在半径 2：({ax},{az})"
     );
 }
@@ -77,11 +84,11 @@ fn revolute_removes_five_dof_and_reports_joint_state() {
         fixed(1)
     );
     let r = solve(&model(&json)).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained);
+    assert_eq!(r.outcome, SolveOutcome::Converged);
     assert_eq!(r.diagnostics.dof_remaining, 1, "revolute 消 5 留 1");
     let mr = r.diagnostics.max_residual.as_ref().unwrap();
     assert!(mr.residual.abs() <= 1e-9, "关节应收敛：{mr:?}");
-    // 关节状态：以初始位形为零点，收敛位形与初始同侧时 θ ≈ 关节实际相对角
+    // 关节状态：θ 只由返回位姿决定
     let js = r
         .diagnostics
         .joints
@@ -105,7 +112,7 @@ fn cylindrical_removes_four_dof() {
         fixed(1)
     );
     let r = solve(&model(&json)).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained);
+    assert_eq!(r.outcome, SolveOutcome::Converged);
     assert_eq!(r.diagnostics.dof_remaining, 2, "cylindrical 消 4 留 2");
 }
 
@@ -122,7 +129,7 @@ fn prismatic_with_roll_removes_five_dof() {
         fixed(1)
     );
     let r = solve(&model(&json)).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained);
+    assert_eq!(r.outcome, SolveOutcome::Converged);
     assert_eq!(
         r.diagnostics.dof_remaining, 1,
         "prismatic（含滚转锁）消 5 留 1"
@@ -142,7 +149,7 @@ fn spherical_removes_three_dof() {
         fixed(1)
     );
     let r = solve(&model(&json)).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained);
+    assert_eq!(r.outcome, SolveOutcome::Converged);
     assert_eq!(r.diagnostics.dof_remaining, 3, "spherical 消 3 留 3");
     let mr = r.diagnostics.max_residual.as_ref().unwrap();
     assert!(mr.residual.abs() <= 1e-9, "{mr:?}");
@@ -276,6 +283,120 @@ fn three_link_arm_with_drives_converges() {
     );
 }
 
+// ── 关节零位由几何定义：求解是位姿的纯函数 ────────────────────
+
+fn three_link_arm(entities: &str) -> String {
+    format!(
+        r#"{{"entities":{entities},"constraints":[
+            {fixed1},
+            {{"id":1,"kind":{{"type":"revolute","a":1,"b":2,
+                "a_axis":{{"origin":{{"x":0.0,"y":0.0,"z":0.0}},"direction":{{"x":0.0,"y":0.0,"z":1.0}}}},
+                "b_axis":{{"origin":{{"x":0.0,"y":0.0,"z":0.0}},"direction":{{"x":0.0,"y":0.0,"z":1.0}}}},
+                "drive":0.4}}}},
+            {{"id":2,"kind":{{"type":"revolute","a":2,"b":3,
+                "a_axis":{{"origin":{{"x":0.0,"y":0.0,"z":0.4}},"direction":{{"x":0.0,"y":0.0,"z":1.0}}}},
+                "b_axis":{{"origin":{{"x":0.0,"y":0.0,"z":0.0}},"direction":{{"x":0.0,"y":0.0,"z":1.0}}}},
+                "drive":0.15}}}},
+            {{"id":3,"kind":{{"type":"revolute","a":3,"b":4,
+                "a_axis":{{"origin":{{"x":0.0,"y":0.0,"z":0.4}},"direction":{{"x":0.0,"y":0.0,"z":1.0}}}},
+                "b_axis":{{"origin":{{"x":0.0,"y":0.0,"z":0.0}},"direction":{{"x":0.0,"y":0.0,"z":1.0}}}}}}}},
+            {{"id":4,"kind":{{"type":"transmission","joint_a":1,"joint_b":3,"ratio":-0.5}}}}]}}"#,
+        fixed1 = fixed(1)
+    )
+}
+
+/// 把求解结果原样再解一次必须逐位不变——旧实现以「本次输入」为关节零点，
+/// 第二次求解会让驱动再叠加一遍。
+#[test]
+fn resolving_the_solution_is_bit_identical() {
+    let l1 = body(2, [0.05, 0.1, 0.4], [0.02, -0.03, 0.05]);
+    let l2 = body(3, [0.1, 0.35, 0.85], [-0.04, 0.06, -0.1]);
+    let l3 = body(4, [0.5, 0.2, 1.3], [0.08, 0.05, 0.2]);
+    let first = solve(&model(&three_link_arm(&format!("[{BASE},{l1},{l2},{l3}]")))).unwrap();
+    assert_eq!(first.outcome, SolveOutcome::Converged);
+    let entities = serde_json::to_string(&first.entities).unwrap();
+    let second = solve(&model(&three_link_arm(&entities))).unwrap();
+    assert_eq!(second.outcome, SolveOutcome::Converged);
+    assert_eq!(second.diagnostics.iterations, 0, "已满足的输入无需迭代");
+    assert_eq!(
+        serde_json::to_string(&second.entities).unwrap(),
+        entities,
+        "再求解一次不得移动任何刚体"
+    );
+}
+
+/// 缺省零位：两体轴同为 z 时，体坐标系对齐即 θ = 0；drive 是绝对角。
+#[test]
+fn revolute_drive_is_absolute_angle() {
+    let b2 = body(2, [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]); // 输入已绕 z 转了 1 rad
+    let json = format!(
+        r#"{{"entities":[{BASE},{b2}],"constraints":[
+            {},
+            {{"id":7,"kind":{{"type":"revolute","a":1,"b":2,
+                "a_axis":{{"origin":{{"x":0.0,"y":0.0,"z":0.0}},"direction":{{"x":0.0,"y":0.0,"z":1.0}}}},
+                "b_axis":{{"origin":{{"x":0.0,"y":0.0,"z":0.0}},"direction":{{"x":0.0,"y":0.0,"z":1.0}}}},
+                "drive":0.25}}}}]}}"#,
+        fixed(1)
+    );
+    let r = solve(&model(&json)).unwrap();
+    assert_eq!(r.outcome, SolveOutcome::Converged);
+    let pose = match &r.entities[1].geometry {
+        ansatz_core::Geometry::Rigid3 { pose } => pose,
+        _ => panic!(),
+    };
+    assert!(
+        (pose.rotation.vector[2] - 0.25).abs() < 1e-9,
+        "绝对角 0.25（而不是 1 + 0.25）：{:?}",
+        pose.rotation.vector
+    );
+}
+
+/// 显式零位参考：a_ref = x、b_ref = y 时，θ = 0 意味着 B 的 y 轴对齐 A 的 x 轴，
+/// 即 B 相对 A 绕 z 转了 −π/2。
+#[test]
+fn explicit_zero_refs_define_joint_zero() {
+    let b2 = body(2, [0.0, 0.0, 0.0], [0.0, 0.0, -1.2]);
+    let json = format!(
+        r#"{{"entities":[{BASE},{b2}],"constraints":[
+            {},
+            {{"id":7,"kind":{{"type":"revolute","a":1,"b":2,
+                "a_axis":{{"origin":{{"x":0.0,"y":0.0,"z":0.0}},"direction":{{"x":0.0,"y":0.0,"z":1.0}}}},
+                "b_axis":{{"origin":{{"x":0.0,"y":0.0,"z":0.0}},"direction":{{"x":0.0,"y":0.0,"z":1.0}}}},
+                "a_ref":{{"x":1.0,"y":0.0,"z":0.0}},"b_ref":{{"x":0.0,"y":1.0,"z":0.0}},
+                "drive":0.0}}}}]}}"#,
+        fixed(1)
+    );
+    let r = solve(&model(&json)).unwrap();
+    assert_eq!(r.outcome, SolveOutcome::Converged);
+    let pose = match &r.entities[1].geometry {
+        ansatz_core::Geometry::Rigid3 { pose } => pose,
+        _ => panic!(),
+    };
+    assert!(
+        (pose.rotation.vector[2] + core::f64::consts::FRAC_PI_2).abs() < 1e-9,
+        "{:?}",
+        pose.rotation.vector
+    );
+}
+
+#[test]
+fn zero_ref_parallel_to_axis_rejected() {
+    let b2 = body(2, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]);
+    let json = format!(
+        r#"{{"entities":[{BASE},{b2}],"constraints":[
+            {},
+            {{"id":7,"kind":{{"type":"revolute","a":1,"b":2,
+                "a_axis":{{"origin":{{"x":0.0,"y":0.0,"z":0.0}},"direction":{{"x":0.0,"y":0.0,"z":1.0}}}},
+                "b_axis":{{"origin":{{"x":0.0,"y":0.0,"z":0.0}},"direction":{{"x":0.0,"y":0.0,"z":1.0}}}},
+                "a_ref":{{"x":0.0,"y":0.0,"z":2.0}}}}}}]}}"#,
+        fixed(1)
+    );
+    match solve(&model(&json)) {
+        Err(ansatz_core::SolveError::InvalidModel { reason }) => assert!(reason.contains("a_ref")),
+        other => panic!("期望 InvalidModel，得到 {other:?}"),
+    }
+}
+
 // ── 传动错误路径 ────────────────────────────────────────────────
 
 #[test]
@@ -289,7 +410,27 @@ fn transmission_requires_revolute_references() {
     );
     match solve(&model(&json)) {
         Err(ansatz_core::SolveError::InvalidModel { reason }) => {
-            assert!(reason.contains("joint_a"))
+            assert!(reason.contains("99"))
+        }
+        other => panic!("期望 InvalidModel，得到 {other:?}"),
+    }
+}
+
+#[test]
+fn transmission_on_same_joint_rejected() {
+    let b2 = body(2, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]);
+    let json = format!(
+        r#"{{"entities":[{BASE},{b2}],"constraints":[
+            {},
+            {{"id":1,"kind":{{"type":"revolute","a":1,"b":2,
+                "a_axis":{{"origin":{{"x":0.0,"y":0.0,"z":0.0}},"direction":{{"x":0.0,"y":0.0,"z":1.0}}}},
+                "b_axis":{{"origin":{{"x":0.0,"y":0.0,"z":0.0}},"direction":{{"x":0.0,"y":0.0,"z":1.0}}}}}}}},
+            {{"id":2,"kind":{{"type":"transmission","joint_a":1,"joint_b":1,"ratio":2.0}}}}]}}"#,
+        fixed(1)
+    );
+    match solve(&model(&json)) {
+        Err(ansatz_core::SolveError::InvalidModel { reason }) => {
+            assert!(reason.contains("两个不同的关节"))
         }
         other => panic!("期望 InvalidModel，得到 {other:?}"),
     }

@@ -1,0 +1,8 @@
+{
+  "description": "有限巨大转角 drive=1e20：常数时间角度折回，不再陷入无限减法循环",
+  "outcome": "converged",
+  "dof_total": 12,
+  "conflict_constraint_ids": [],
+  "dof_remaining": 0,
+  "redundant_constraint_ids": []
+}

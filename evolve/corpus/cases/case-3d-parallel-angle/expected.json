@@ -1,0 +1,8 @@
+{
+  "description": "方向初始平行、目标垂直：逃离零角梯度，返回的方向实际满足约束",
+  "outcome": "converged",
+  "dof_total": 12,
+  "conflict_constraint_ids": [],
+  "dof_remaining": 5,
+  "redundant_constraint_ids": []
+}

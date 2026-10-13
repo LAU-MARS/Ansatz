@@ -1,0 +1,14 @@
+{
+  "description": "距离不能为负，是由约束语义直接证明的矛盾",
+  "outcome": "inconsistent",
+  "dof_total": 12,
+  "conflict_constraint_ids": [
+    [
+      1
+    ]
+  ],
+  "redundant_constraint_ids": [],
+  "suggestion_actions": [
+    "relax_constraint:1"
+  ]
+}

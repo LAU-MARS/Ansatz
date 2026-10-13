@@ -38,14 +38,10 @@ pub struct Vec3 {
 
 /// 3D 旋转的参数化：**指数映射（旋转向量）** `v = θ·û`。
 ///
-/// # 为什么选指数映射而不是四元数
-///
-/// - 四元数是 4 参数表示 3 个自由度，求解时必须额外引入单位范数约束，
-///   等于给系统加了一个非线性方程；且其雅可比存在冗余列，牛顿类求解器
-///   的法方程矩阵 `JᵀJ` 必然奇异，需要额外的流形投影/正交化处理。
-/// - 指数映射是**最小参数化**（3 参数 ↔ 3 自由度）：无冗余列、无额外约束，
-///   `θ → 0` 时 `v → 0` 连续，没有四元数的 ±q 双重覆盖问题，也没有
-///   欧拉角的万向锁。
+/// JSON 使用紧凑的三维旋转向量。它是姿态存储格式，并非全局无奇异
+/// 的求解坐标：2π 等位置的全局参数雅可比会退化。
+/// 求解内部采用三维 SO(3) 局部增量并复合旋转，DOF 分析也使用该切空间。
+/// 四元数存储配合三维局部增量同样无需添加单位范数约束。
 ///
 /// # 切换抽象点
 ///
@@ -104,7 +100,7 @@ pub struct Axis3 {
     pub direction: Vec3,
 }
 
-/// 几何实体。每个变体自带全部几何参数（骨架阶段不做参数共享/引用式建模）。
+/// 几何实体。每个变体自带全部几何参数（不做参数共享/引用式建模）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
@@ -172,9 +168,10 @@ pub struct Entity {
 
 /// 约束种类与参数。
 ///
-/// 2D 草图约束与 3D 装配约束共用本枚举。骨架阶段的求解器只支持
-/// [`ConstraintKind::Distance`] 的 `b = None`（到原点）形式，其余类型
-/// 会被 [`crate::solve`](crate::solver::solve) 以
+/// 2D 草图约束与 3D 装配约束共用本枚举。2D 路径目前只支持
+/// [`ConstraintKind::Distance`] 的 `b = None`（到原点）形式；3D 路径支持
+/// distance / angle / fixed / mate / coaxial / 关节族 / transmission。
+/// 其余组合会被 [`crate::solve`](crate::solver::solve) 以
 /// [`SolveError::UnsupportedConstraint`](crate::report::SolveError::UnsupportedConstraint)
 /// 拒绝——这是「能力未实现」的工具级错误，不是求解失败。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -219,8 +216,9 @@ pub enum ConstraintKind {
         b_anchor: Option<Vec3>,
     },
     /// 角度（弧度）。2D：`b = None` 表示相对参考系（未实现）。
-    /// 3D 装配：a、b 为两个 Rigid3，`a_dir`/`b_dir` 为各自体坐标系内的参考方向
-    /// （不必单位化），残差为 `dot(R_a·a_dir, R_b·b_dir) − cos(value)`。
+    /// 3D 装配：a、b 为两个 Rigid3，`a_dir`/`b_dir` 为非零参考方向
+    /// （求解时归一化）。容差按真实夹角误差（弧度）检查；0/π 的方向对齐
+    /// 消去两个转动自由度，其他角度通常消去一个。
     Angle {
         a: EntityId,
         b: Option<EntityId>,
@@ -265,9 +263,12 @@ pub enum ConstraintKind {
         b_axis: Axis3,
     },
     /// 3D 装配：**转动副**（revolute）——同轴 + 轴向锚点间距锁定，
-    /// 消 5 留 1（绕轴转动）。`offset` 为两轴原点沿轴的间距（缺省 0）；
-    /// `drive` 给出关节角目标（弧度，0 = 输入位形处的相对转角，
-    /// 即以初始装配为标定零位），施加后关节完全确定。
+    /// 消 5 留 1（绕轴转动）。`offset` 为两轴原点沿轴的间距（缺省 0）。
+    ///
+    /// 关节角 θ 是**位姿的函数**：从 `R_a·a_ref` 绕 a 轴转到 `R_b·b_ref` 的
+    /// 有向角，取主值 (−π, π]。`a_ref`/`b_ref` 是各自体坐标系内的零位参考
+    /// 方向（会被投影到垂直于轴的平面再归一）；缺省时按轴方向确定性地选取。
+    /// `drive` 是 θ 的绝对目标（弧度），因此把求解结果原样再解一次不会移动。
     Revolute {
         a: EntityId,
         b: EntityId,
@@ -282,20 +283,44 @@ pub enum ConstraintKind {
             feature = "serde",
             serde(default, skip_serializing_if = "Option::is_none")
         )]
+        a_ref: Option<Vec3>,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        b_ref: Option<Vec3>,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
         drive: Option<f64>,
     },
     /// 3D 装配：**圆柱副**（cylindrical）——同轴，消 4 留 2
-    /// （沿轴滑动 + 绕轴转动）。等价于 coaxial，语义别名，诊断按关节报告。
+    /// （沿轴滑动 + 绕轴转动）。约束行与 coaxial 相同，诊断按关节报告 θ，
+    /// θ 的定义与零位参考同 revolute。
     Cylindrical {
         a: EntityId,
         b: EntityId,
         a_axis: Axis3,
         b_axis: Axis3,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        a_ref: Option<Vec3>,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        b_ref: Option<Vec3>,
     },
     /// 3D 装配：**移动副**（prismatic）——圆柱副 + 姿态滚转锁定，
     /// 消 5 留 1（沿轴平动）。滚转通过一对垂直于轴的参考方向锁定
-    /// （`roll` 为其夹角目标，弧度；参考方向缺省时退化为圆柱副）。
-    /// `drive` 为关节平动目标（沿轴位移，0 = 初始位形处锚点轴向间距）。
+    /// （`roll` 为绕 a 轴的有向夹角目标，取 [0, π]，弧度）。
+    /// a_ref/b_ref/roll 必须一起给出；全部缺省则确定性选取参考方向并锁定 roll=0。
+    /// 参考方向先投影到各自轴的法平面并归一化。
+    /// 关节变量 δ = (b 轴原点 − a 轴原点)·(a 轴方向)，世界系下的有向距离；
+    /// `drive` 是 δ 的绝对目标。
     Prismatic {
         a: EntityId,
         b: EntityId,
@@ -332,8 +357,9 @@ pub enum ConstraintKind {
         b_point: Vec3,
     },
     /// 3D 装配：**传动耦合**（齿轮/带轮）——两个已存在的 revolute 关节的
-    /// 关节变量按速比联动：`(θ_b − θ_b₀) = ratio · (θ_a − θ_a₀)`（θ₀ 为
-    /// 初始位形处的关节变量）。`joint_a`/`joint_b` 是 revolute 约束的 id。
+    /// 关节变量按速比联动：`θ_b = ratio · θ_a`（θ 为 revolute 文档定义的
+    /// 绝对关节角；残差折回 (−π, π]）。两个关节的零位由各自的
+    /// `a_ref`/`b_ref` 决定。`joint_a`/`joint_b` 是两个不同 revolute 约束的 id。
     Transmission {
         joint_a: u32,
         joint_b: u32,
@@ -392,10 +418,6 @@ fn default_max_iterations() -> u32 {
     100
 }
 
-fn default_allow_underconstrained() -> bool {
-    true
-}
-
 /// 求解参数。
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -405,16 +427,13 @@ fn default_allow_underconstrained() -> bool {
     serde(deny_unknown_fields)
 )]
 pub struct SolveParams {
-    /// 绝对容差：同时用作残差收敛判据与「距离值是否一致」的冲突判据。
+    /// 正有限绝对容差：长度按长度单位，角度按弧度检查。
+    /// 同锚点距离仅在各自容差区间不相交时判为已证实冲突。
     #[cfg_attr(feature = "serde", serde(default = "default_tolerance"))]
     pub tolerance: f64,
-    /// 最大迭代数（骨架阶段闭式解不迭代，字段保留为契约的一部分）。
+    /// 3D 路径 LM 的最大迭代数（2D 闭式路径不迭代）。
     #[cfg_attr(feature = "serde", serde(default = "default_max_iterations"))]
     pub max_iterations: u32,
-    /// 是否接受欠约束解：为 `true` 时报告 `Underconstrained` 并附特解；
-    /// 为 `false` 时同样报告 `Underconstrained`，但实体原样返回输入。
-    #[cfg_attr(feature = "serde", serde(default = "default_allow_underconstrained"))]
-    pub allow_underconstrained: bool,
 }
 
 impl Default for SolveParams {
@@ -422,7 +441,6 @@ impl Default for SolveParams {
         Self {
             tolerance: default_tolerance(),
             max_iterations: default_max_iterations(),
-            allow_underconstrained: default_allow_underconstrained(),
         }
     }
 }
@@ -449,7 +467,12 @@ impl Model {
     }
 }
 
-/// 求解结局。这是**求解层**的结果（区别于工具层错误 [`crate::SolveError`]）。
+/// 求解结局：只回答「返回的位形是否满足全部约束」。这是**求解层**的结果
+/// （区别于工具层错误 [`crate::SolveError`]）。
+///
+/// 欠约束（`diagnostics.dof_remaining > 0`）与冗余
+/// （`diagnostics.redundant_constraints` 非空）是与结局正交的事实，
+/// 不折叠进本枚举：一个完美满足但仍可拖动的草图就是 `Converged`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
@@ -460,14 +483,10 @@ impl Model {
 pub enum SolveOutcome {
     /// 在容差内满足全部约束。
     Converged,
-    /// 约束一致但自由度未耗尽（附特解或原样返回，取决于参数）。
-    Underconstrained,
-    /// 约束一致但存在冗余（线性相关），解集仍可能非空。
-    Overconstrained,
-    /// 约束互相冲突，无解（附冲突组与修复建议）。
+    /// 约束互相冲突：`diagnostics.conflicts` 给出冲突组与修复建议。
     Inconsistent,
-    /// 达到最大迭代数仍未收敛（骨架阶段不会出现，保留为契约的一部分）。
-    MaxIterations,
+    /// 未收敛，且未能证明冲突（迭代上限、退化初值或非线性停滞）。
+    NotConverged,
 }
 
 impl SolveOutcome {
@@ -475,10 +494,8 @@ impl SolveOutcome {
     pub fn as_str(&self) -> &'static str {
         match self {
             SolveOutcome::Converged => "converged",
-            SolveOutcome::Underconstrained => "underconstrained",
-            SolveOutcome::Overconstrained => "overconstrained",
             SolveOutcome::Inconsistent => "inconsistent",
-            SolveOutcome::MaxIterations => "max_iterations",
+            SolveOutcome::NotConverged => "not_converged",
         }
     }
 }

@@ -22,10 +22,15 @@
 use wasm_bindgen::prelude::*;
 
 use ansatz_core::{solve as solve_core, Envelope, Model};
-use serde_wasm_bindgen::{from_value, to_value};
+use serde::Serialize;
+use serde_wasm_bindgen::{from_value, Serializer};
 
 fn envelope_to_js(envelope: &Envelope) -> JsValue {
-    to_value(envelope).unwrap_or(JsValue::NULL)
+    // Flattened diagnostic actions must be plain objects, and absent optional
+    // values must be null, just like the JSON and native shells.
+    envelope
+        .serialize(&Serializer::json_compatible())
+        .unwrap_or(JsValue::NULL)
 }
 
 fn envelope_json(envelope: &Envelope) -> String {
@@ -53,8 +58,8 @@ pub fn solve(model: &JsValue) -> JsValue {
         Ok(model) => model,
         Err(e) => {
             return envelope_to_js(&Envelope::error(
-                "invalid_model",
-                &format!("模型反序列化失败：{e}"),
+                "invalid_json",
+                &format!("输入不符合模型 schema：{e}"),
             ))
         }
     };

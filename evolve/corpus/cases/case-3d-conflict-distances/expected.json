@@ -1,7 +1,8 @@
 {
-  "description": "同一对刚体的两个距离要求相差 1.0（> 容差）：可证明的不一致",
+  "description": "同一对刚体、同一对锚点的距离同时要求 2.0 与 3.0：由距离目标的直接矛盾证明冲突，不依赖局部驻点",
   "outcome": "inconsistent",
   "dof_total": 12,
-  "redundant_constraint_ids": [[1, 2]],
+  "conflict_constraint_ids": [[1, 2]],
+  "redundant_constraint_ids": [],
   "suggestion_actions": ["remove_constraint:2"]
 }

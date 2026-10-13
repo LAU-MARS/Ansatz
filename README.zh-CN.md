@@ -11,11 +11,13 @@
 
 一个可移植的几何约束求解器，面向 2D 草图与 3D 装配。单一 Rust 核心，原生运行于 macOS / Linux / Windows / HarmonyOS，通过 WASM 支持浏览器与 Node，以 JSON 输入输出，对 Agent 友好。
 
-**结构化诊断是一等公民**：不只回答「解出来了没有」，还要回答「为什么没解出来」——自由度计数、冗余/冲突约束组、每条约束的残差、机器可读的修复建议，且每条诊断都带同时面向人类与 LLM 的 `human_message`。
+**结构化诊断是一等公民**：不只回答「解出来了没有」，还要回答「为什么没解出来」——自由度计数、冲突约束组（与「一致但冗余」的约束组分开报告）、每条约束的残差、机器可读的修复建议，且每条诊断都带同时面向人类与 LLM 的 `human_message`。
+
+**求解是位姿的纯函数**：把求解结果原样再解一次，得到逐位相同的结果——关节零位由几何定义，不依赖「本次输入时的位形」。
 
 服务两类问题：
 
-- **2D 草图约束**：重合、共线、平行、垂直、相切、距离、角度、对称、固定
+- **2D 草图约束**：当前实现点到原点距离；重合、共线、平行、垂直、相切等仍待实现
 - **3D 装配约束**：6-DOF 刚体配合——贴合、同轴、距离、角度
 
 ## 当前阶段：3D 装配 + 机器人学原语已实现
@@ -25,22 +27,32 @@ distance（**锚点**距离）、angle（方向夹角）、fixed（固定）。
 
 ✅ **机器人学原语**：
 - **关节族**（first-class，诊断按关节报告）：revolute（消 5 留 1）、
-  cylindrical（消 4 留 2）、prismatic（含滚转锁，消 5 留 1）、
-  spherical（球副，消 3 留 3）
-- **关节驱动**：`drive` 字段以初始装配为零位驱动关节变量
-  （revolute 弧度 / prismatic 位移），施加后机构完全确定
+  cylindrical（消 4 留 2）、prismatic（消 5 留 1）、spherical（球副，消 3 留 3）。
+  移动副的 `a_ref`、`b_ref`、`roll` 必须一起提供；全部缺省时按轴选取确定性参考
+  方向并锁定零滚转，仍是移动副
+- **关节变量是绝对量**：revolute 的 θ 是绕轴从 `R_a·a_ref` 转到 `R_b·b_ref`
+  的有向角（`a_ref`/`b_ref` 为各自体坐标系内的零位参考，可选，缺省按轴方向
+  确定性选取）；prismatic 的 δ 是两轴原点沿轴的有向距离。`drive` 直接给出
+  这些绝对目标（弧度 / 长度），消除该关节剩余的运动。转动目标通过有界余数运算
+  按 `2π` 折回，有限巨大角度也能返回；满足后的位姿再求解不会移动
 - **关节状态诊断**：`diagnostics.joints` 逐关节报告当前变量
-- **传动耦合**：`transmission` 约束按速比联动两个 revolute 关节
-  （齿轮/带轮，外啮合为负速比）
+- **传动耦合**：`transmission` 约束在两个不同的 revolute 关节间施加
+  `θ_b = ratio · θ_a`（齿轮/带轮，外啮合为负速比），差值按 `2π` 折回；
+  尚不支持连续展开的传动相位追踪
 
-数值内核：Levenberg–Marquardt（SVD 阻尼伪逆步）+ SO(3) 指数映射解析雅可比
-（逐约束族 FD 交叉验证）+ SVD 秩分析（DOF/冗余/条件数）。线性代数站在
-**nalgebra** 上（纯 Rust、无 BLAS、no_std），施加方式与收敛语义自持。
-实测：全约束装配 4 次迭代到 ~1e-13；三连杆机械臂双驱动 + 传动耦合收敛且
-速比精确保持；**迭代解跨平台位级一致**（parity case3/case4 冻结）。
+数值内核：Levenberg–Marquardt 在 SO(3) 局部切空间使用解析雅可比与 SVD 阻尼步。
+平移和旋转分别以三列为一组均衡，再用于步长、秩和条件数计算。线性代数使用
+**nalgebra**（纯 Rust、无 BLAS、no_std），核心负责更新顺序与收敛语义。
+回归测试覆盖退化初值、等价旋转表示和大尺度锚点；parity 同时覆盖迭代位姿与数值诊断。
+
+夹角方向先归一化，按真实弧度与 `tolerance` 比较；精确的 `0`、`π` 目标各消除
+两个旋转自由度。同轴要求轴方向相同。3D 零距离表示锚点重合，消除三个位置自由度；
+2D 点到原点零距离把点固定在原点，剩余自由度为零。所有数值输入必须有限，
+`tolerance` 必须为正；无效输入或初始约束求值产生非有限量时返回 `invalid_model`。
 
 ⚠️ 尚未实现：通用 2D 草图约束（coincident/parallel/tangent 等，对 rigid3
-以外实体仍返回 `unsupported_constraint`）。2D 点距离闭式解路径位级冻结。
+以外实体仍返回 `unsupported_constraint`）。2D 模型目前只支持「点到原点距离」
+的闭式解。已满足约束的点直接保留坐标，回灌时不重新投影，保证逐位幂等。
 
 ## 架构
 
@@ -48,7 +60,7 @@ distance（**锚点**距离）、angle（方向夹角）、fixed（固定）。
                 ┌──────────────────────────────────────────┐
                 │              ansatz-core                 │
                 │   纯算法 · no_std · f64 · 诊断一等公民     │
-                │   （唯一允许出现数学的地方）                │
+                │   （产品数值算法所在）                      │
                 └───────┬──────────┬──────────┬────────────┘
                         │          │          │
         ┌───────────────┤          │          ├───────────────┐
@@ -85,7 +97,7 @@ ansatz/
 
 ```bash
 cargo build --workspace
-cargo test --workspace        # 21 个测试，含位级一致性断言
+cargo test --workspace        # 含数值回归与位级 parity 断言
 
 # CLI：3-4-5 三角形缩放，(3,4) 施加到原点距离 10 → (6,8)
 echo '{"entities":[{"id":1,"geometry":{"type":"point2","x":3.0,"y":4.0}}],
@@ -93,15 +105,17 @@ echo '{"entities":[{"id":1,"geometry":{"type":"point2","x":3.0,"y":4.0}}],
   | cargo run -p ansatz-cli -- solve
 ```
 
-输出（欠约束但给出特解 + 完整诊断）：
+输出（约束满足即 converged，退出码 0；剩余 1 个自由度在诊断里）：
 
 ```json
 {
-  "outcome": "underconstrained",
+  "outcome": "converged",
   "entities": [{ "id": 1, "geometry": { "type": "point2", "x": 6.0, "y": 8.0 } }],
   "diagnostics": {
     "dof_total": 2,
     "dof_remaining": 1,
+    "iterations": 0,
+    "conflicts": [],
     "redundant_constraints": [],
     "residuals": [{ "constraint_id": 1, "residual": 0.0, "human_message": "约束 1 在返回的特解处残差为 0e0（即 ‖p‖ − 1e1）。" }],
     "max_residual": { "constraint_id": 1, "residual": 0.0, "human_message": "…" },
@@ -110,6 +124,7 @@ echo '{"entities":[{"id":1,"geometry":{"type":"point2","x":3.0,"y":4.0}}],
       "dof_remaining": 1,
       "human_message": "模型还有 1 个自由度未被约束。以「点到原点的距离」为例：它只固定了模长，点仍可沿圆周滑动，需要再施加角度或坐标类约束。"
     }],
+    "joints": [],
     "jacobian_condition_estimate": 1.0
   }
 }
@@ -119,8 +134,8 @@ echo '{"entities":[{"id":1,"geometry":{"type":"point2","x":3.0,"y":4.0}}],
 
 | 退出码 | 含义 | 输出 |
 |---|---|---|
-| 0 | `converged` | 报告 JSON → stdout |
-| 1 | 求解层失败（inconsistent / overconstrained / underconstrained / max_iterations），完整诊断照常 | 报告 JSON → stdout |
+| 0 | `converged`：返回位形满足全部约束（可能仍有剩余自由度或冗余，见诊断） | 报告 JSON → stdout |
+| 1 | 求解层失败（`inconsistent` / `not_converged`），完整诊断照常 | 报告 JSON → stdout |
 | 2 | 工具错误（非法 JSON / 模型无效 / 能力未实现） | 错误 JSON `{kind, message}` → stderr |
 
 ## npm 安装（ansatz-wasm）
@@ -173,17 +188,34 @@ cargo run -p ansatz-cli -- export-schema solve-report
 
 ## 结构化诊断
 
-求解失败不是异常，而是携带完整证据的报告：
+求解失败不是异常，而是携带完整证据的报告。`outcome` 只回答一个问题——返回的位形是否满足全部约束：
 
-- `dof_total / dof_remaining`：自由度计数（骨架阶段为通用计数近似）
-- `redundant_constraints`：线性相关的约束组（互相重复或互相冲突，id 集合）
+| `outcome` | 含义 |
+|---|---|
+| `converged` | 全部约束在几何容差内满足 |
+| `inconsistent` | 已直接证明矛盾，`diagnostics.conflicts` 给出冲突组 |
+| `not_converged` | 未满足，且未能证明冲突，包括非线性驻点处的求解失败 |
+
+欠约束与冗余是与结局正交的事实，放在 `diagnostics` 里：
+
+- `dof_total / dof_remaining`：自由度计数，`dof_remaining = 自由参数数 − rank(J)`，
+  J 为返回位姿处经列均衡的局部雅可比。这是一阶局部信息；一般奇异机构仍需额外分析
+- `iterations`：实际迭代数（2D 闭式路径为 0）
+- `conflicts`：当前直接证明覆盖负距离、只涉及固定刚体但不满足的约束，以及同一锚点
+  对上容差区间不相交的距离目标。驻点残差或雅可比左零空间投影不能单独证明
+  非线性模型无解；这类失败报告 `not_converged`
+- `redundant_constraints`：满足位姿处的局部一阶冗余，**与书写顺序无关**——去掉某条
+  约束后局部 rank(J) 不变，贡献相互重叠的约束归为一组。这不证明删除后全局非线性
+  解集不变；同一刚体上的重复 `fixed` 直接报告
 - `residuals` / `max_residual`：每条约束在返回解处的残差
+- `joints`：逐关节的绝对关节变量
 - `suggestions`：机器可读动作（`remove_constraint{id}` / `relax_constraint{id}` / `add_constraint{dof_remaining}`）
-- `jacobian_condition_estimate`：雅可比条件数估计（骨架阶段单条归一化约束行精确为 1.0；退化/秩亏为 null）
+- `jacobian_condition_estimate`：列均衡后局部雅可比的条件数估计 `σ_max/σ_min(非零)`；
+  无约束或退化时为 null
 
 ## 数值可复现性（跨平台位级一致）
 
-同一输入在 x86-64 / aarch64 / wasm32 上**逐位相同**，这是硬承诺：
+同一版本、同一输入，在 x86-64 / aarch64 / wasm32 上**逐位相同**，这是硬承诺：
 
 1. 严格 IEEE 754 语义：不启用任何等价 `-ffast-math` 的选项，不手写 FMA 融合（依据与锁死方式见根 `Cargo.toml` 的 `[profile.release]` 注释）；
 2. 超越函数只经 `libm`（纯 Rust，所有目标编译同一份代码，正确舍入是构造性的）；
@@ -192,14 +224,22 @@ cargo run -p ansatz-cli -- export-schema solve-report
    - wasm Node 冒烟（`crates/ansatz-wasm/smoke/node.mjs`）
    - node 原生冒烟（`crates/ansatz-node/smoke/native.mjs`）
 
-   `case2`（2D 非精确路径）与 `case3`（**3D 全约束装配的 LM 迭代解**）是跨架构
-一致性的真金火检验；case3 已在 x86-64 的 debug/release/wasm/node 上逐位一致。
-JSON 往返同样在承诺内——serde_json 全线启用 `float_roundtrip`（默认快速解析
-对某些 17 位小数差 1 ULP，被 evolve 黄金语料实测咬到过）。
+   `case3`（3D 全约束装配）与 `case4`（驱动 + 传动的三连杆臂）覆盖 LM 迭代；
+   `case5` 覆盖非精确 2D 归一化，`case6` 覆盖等价整周姿态下的零滚转关节。
+   位姿坐标、每条残差和关节变量及适用的条件数均按位断言，回灌与 JSON 往返另验幂等。
+JSON 往返同样在承诺内——serde_json 全线启用
+`float_roundtrip`（默认快速解析对某些 17 位小数差 1 ULP）。
+
+承诺的是跨平台确定性，而不是冻结数值：有意修改迭代策略或升级分解库都可能
+合法地改变这些位模式，届时重新生成 parity 文件即可。行为正确性由常规测试与
+evolve 语料按容差断言。
 
 ## 3D 刚体位姿参数化
 
-采用**指数映射（旋转向量）** `v = θ·û` 而非四元数：3 参数 ↔ 3 自由度的最小参数化，求解时无需额外的单位范数约束，雅可比无冗余列（四元数的 `JᵀJ` 必然奇异）；`θ→0` 连续、无双重覆盖、无万向锁。`Rotation3` 是参数化的唯一入口，未来切换表示只动它一处——理由与切换抽象点详见 `ansatz-core/src/model.rs`。
+JSON 位姿保持**旋转向量** `v = θ·û`。求解器在 SO(3) 局部切空间对三个旋转增量
+求导并组合更新，而非直接向全局旋转向量加增量，避免 `2π` 坐标奇异破坏物理 DOF。
+旋转向量并非全局唯一表示。未来即便采用四元数存储，也可以仍用三个局部优化变量，
+无需额外加入单位范数求解方程。
 
 ## CI
 
@@ -209,23 +249,29 @@ JSON 往返同样在承诺内——serde_json 全线启用 `float_roundtrip`（�
 
 [`evolve/`](evolve/README.zh-CN.md) 是独立的 cargo workspace，使命是让「改进求解器」本身成为可自动化迭代的闭环（RSI：递归自我改进）。当前为**阶段 A（手动提案模式）**，已就位并实测：
 
-- **黄金语料**（`evolve/corpus/`）：7 个 case 覆盖全部结局路径，数值断言用位模式——与产品位级一致性承诺同源；
-- **确定性评测器**（`ansatz-eval`）：候选求解器只以子进程 + 超时黑盒运行，fitness 只依赖确定性事实（首跑即捕获 `0.0×(−3.0)=−0.0` 的负零位差异）；
+- **黄金语料**（`evolve/corpus/`）：25 个 case 覆盖结局与数值审查反例。写出的期望
+  比较结局、DOF、约束组与建议，位姿与关节变量按容差比较；
+- **独立评测器**（`ansatz-eval`）：候选只以子进程 + 超时运行，每个 case 两次输出
+  必须逐字节相同。每份报告都校验完整 JSON 契约及模型成员；对 `converged` 结果
+  独立重建几何、复算所有已支持约束，并检查固定体与关节变量。候选自报残差或期望
+  字段缺省不能绕过这些检查。共享的仅是固定仓库数据类型，不采信候选数学实现；
 - **循环骨架**（`ansatz-evolve`）：`proposals/` 投递箱 + `Proposer`/`Selector` trait（vendor 无关，为 LLM 提案者预留）+ JSONL 谱系归档；
-- 产品 CI 的 `evolve-eval` job 强制求解器对黄金语料 7/7 全过——求解器行为变化必须「有意地」同步语料。
+- 产品 CI 的 `evolve-eval` job 要求黄金语料全部通过——求解器行为变化必须「有意地」同步语料。
 
 路线：A 手动提案 → B 自动 apply/build/eval 闭环 → C LLM 提案者 → D 语料共演化（改进者改进自己的考卷，闭环回流——真正跨入 RSI）。详见 `evolve/README.md`。
 
 ## 路线图
 
 1. ~~阶段 0：骨架——管线、诊断框架、契约、CI、位级一致性设施~~ ✅
-2. ~~阶段 1：通用数值核心（LM + 解析雅可比）~~ ✅（3D 路径；稠密线性代数手写）
-3. ~~阶段 2：真实秩分析~~ ✅（SVD 秩 + 贪心冗余判定；冲突距离有可证明捷径）
+2. ~~阶段 1：通用数值核心（LM + 解析雅可比）~~ ✅（3D 路径；稠密 SVD 由 nalgebra 提供）
+3. ~~阶段 2：局部秩分析~~ ✅（列均衡 SVD 秩、直接冲突证明、与顺序无关的一阶冗余分组）
 4. 阶段 3（进行中）：3D 装配 ✅ + 机器人学原语（关节族/驱动/传动，P0–P1.5）✅ → 2D 草图约束全集（待做）
 5. 阶段 4：HarmonyOS NAPI 交付物（基于 ansatz-ffi + OHOS NDK）
 6. 远期：螺旋副（screw）、关节限位（不等式）、装配模式显式选择、稀疏后端、URDF 导入
 
-并行轨道（evolve/）：A 手动提案（已就位）→ B 自动闭环 → C LLM 提案者 → D 语料共演化（RSI）。黄金语料已含 3 个 3D 用例（含 LM 迭代解位模式）。
+并行轨道（evolve/）：A 手动提案（已就位）→ B 自动闭环 → C LLM 提案者 → D 语料共演化
+（RSI）。语料包含驱动机械臂、保守的非线性失败诊断与数值审查反例。生成压力测试和
+留出真实模型仍属后续工作；公开语料全绿不能单独证明求解器普遍稳健。
 
 ## 致谢
 

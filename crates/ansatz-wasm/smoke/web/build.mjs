@@ -5,7 +5,7 @@
 //   wasm-pack build crates/ansatz-wasm --release --target web --out-dir pkg-web
 //   node crates/ansatz-wasm/smoke/web/build.mjs
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -18,6 +18,12 @@ const inlinedGlue = glue.replace(/export \{ initSync, __wbg_init as default \};/
 if (inlinedGlue === glue) throw new Error('胶水结构与预期不符，请检查 pkg-web/ansatz_wasm.js 的导出行');
 
 const wasmB64 = readFileSync(path.join(pkg, 'ansatz_wasm_bg.wasm')).toString('base64');
+const parityDir = path.join(here, '..', '..', '..', 'ansatz-core', 'tests', 'parity');
+const parityCases = readdirSync(parityDir).filter((f) => f.endsWith('.model.json')).sort().map((file) => {
+  const name = file.slice(0, -'.model.json'.length);
+  return { name, model: JSON.parse(readFileSync(path.join(parityDir, file), 'utf8')),
+    expected: JSON.parse(readFileSync(path.join(parityDir, name + '.expected.json'), 'utf8')) };
+});
 
 const model = {
   entities: [{ id: 1, geometry: { type: 'point2', x: 3.0, y: 4.0 } }],
@@ -55,7 +61,7 @@ try {
   const bin = atob(WASM_B64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  initSync(bytes); // 同步实例化：无 fetch、无跨域、file:// 可用
+  initSync({ module: bytes }); // 同步实例化：无 fetch、无跨域、file:// 可用
 
   const model = ${JSON.stringify(model)};
   const lines = [];
@@ -75,6 +81,35 @@ try {
   lines.push('solve():     ok=' + env2.ok + ', point=(' + g2.x + ', ' + g2.y + ')');
 
   const pass = env.ok && g.x === 6 && g.y === 8 && env2.ok && g2.x === 6 && g2.y === 8;
+  if (!pass) throw new Error('basic API smoke failed');
+  const cases = ${JSON.stringify(parityCases)};
+  const buffer = new ArrayBuffer(8), floats = new Float64Array(buffer), bits = new BigUint64Array(buffer);
+  const assertBits = (value, hex) => {
+    floats[0] = value;
+    if (bits[0] !== BigInt(hex)) throw new Error('bit parity failed: ' + hex);
+  };
+  for (const {name, model, expected} of cases) {
+    const result = JSON.parse(solveJson(JSON.stringify(model)));
+    if (!result.ok || result.result.outcome !== expected.outcome) throw new Error(name + ': outcome');
+    const report = result.result;
+    for (let i = 0; i < expected.entities.length; i++) {
+      const g = report.entities[i].geometry, want = expected.entities[i];
+      if (g.type === 'point2') { assertBits(g.x, want.x); assertBits(g.y, want.y); }
+      else {
+        const values = [g.pose.translation.x, g.pose.translation.y, g.pose.translation.z, ...g.pose.rotation.vector];
+        ['tx','ty','tz','rx','ry','rz'].forEach((field, k) => assertBits(values[k], want.pose[field]));
+      }
+    }
+    const d = report.diagnostics;
+    assertBits(Math.abs(d.max_residual.residual), expected.max_residual_abs);
+    assertBits(d.jacobian_condition_estimate, expected.jacobian_condition_estimate);
+    for (const field of ['residuals', 'joints']) {
+      const key = field === 'joints' ? 'value' : 'residual';
+      d[field].forEach((entry, i) => assertBits(entry[key], expected[field][i][key]));
+    }
+    if (JSON.stringify(solve(model)) !== JSON.stringify(result)) throw new Error(name + ': complete envelope parity');
+    lines.push(name + ': bit parity');
+  }
   lines.push(pass ? 'SMOKE PASS ✓' : 'SMOKE FAIL ✗');
   out.textContent = lines.join('\\n');
   out.className = pass ? 'ok' : '';

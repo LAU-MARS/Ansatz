@@ -36,8 +36,8 @@ pub fn solve(model: serde_json::Value) -> serde_json::Value {
         Ok(model) => model,
         Err(e) => {
             return serde_json::to_value(Envelope::error(
-                "invalid_model",
-                &format!("模型反序列化失败：{e}"),
+                "invalid_json",
+                &format!("输入不符合模型 schema：{e}"),
             ))
             .unwrap_or(serde_json::Value::Null)
         }

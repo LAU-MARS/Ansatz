@@ -71,7 +71,13 @@ const parseHex = (s) => BigInt(s);
 console.log(`native version() = ${native.version()}`);
 assert.match(native.version(), /^\d+\.\d+\.\d+/);
 
-for (const name of ['case1', 'case2', 'case3', 'case4']) {
+const cases = readdirSync(PARITY_DIR)
+  .filter((f) => f.endsWith('.model.json'))
+  .map((f) => f.slice(0, -'.model.json'.length))
+  .sort();
+assert.ok(cases.length > 0, 'parity 目录下至少要有一个算例');
+
+for (const name of cases) {
   const model = JSON.parse(readFileSync(path.join(PARITY_DIR, `${name}.model.json`), 'utf8'));
   const expected = JSON.parse(readFileSync(path.join(PARITY_DIR, `${name}.expected.json`), 'utf8'));
 
@@ -103,10 +109,19 @@ for (const name of ['case1', 'case2', 'case3', 'case4']) {
     bitsOf(diag.jacobian_condition_estimate),
     parseHex(expected.jacobian_condition_estimate)
   );
+  for (const field of ['residuals', 'joints']) {
+    const value = field === 'joints' ? 'value' : 'residual';
+    assert.equal(diag[field].length, expected[field].length);
+    diag[field].forEach((entry, i) => {
+      assert.equal(entry.constraint_id, expected[field][i].constraint_id);
+      assert.equal(bitsOf(entry[value]), parseHex(expected[field][i][value]), `${name}.${field}[${i}]`);
+    });
+  }
 
   // 结构化 API 与字符串 API 一致（首个实体的首个数值字段）
   const structured = native.solve(model);
   assert.equal(structured.ok, true);
+  assert.deepEqual(structured, envelope, `${name}: complete structured/JSON envelope parity`);
   const sg = structured.result.entities[0].geometry;
   const firstNum = sg.type === 'point2' ? sg.x : sg.pose.translation.x;
   const wg = expected.entities[0];
@@ -125,5 +140,8 @@ const unsupported = native.solve({
 });
 assert.equal(unsupported.ok, false);
 assert.equal(unsupported.error.kind, 'unsupported_constraint');
+const shapeless = native.solve({ entities: 'nope', constraints: [] });
+assert.equal(shapeless.ok, false);
+assert.equal(shapeless.error.kind, 'invalid_json');
 
 console.log('native smoke: ALL PASS');

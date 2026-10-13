@@ -1,11 +1,15 @@
 //! 确定性评测器：候选求解器 × 黄金语料 → 结构化指标。
 //!
-//! 这是自进化闭环的 **fitness 来源**，因此把确定性放在第一位：
-//! - 求解器只以黑盒方式访问（`ansatz-cli solve` 子进程 + 超时 + stdin/stdout JSON），
-//!   演化产物绝不在本进程内执行；
-//! - 判定只依赖确定性事实（退出码 / outcome / DOF / 位模式 / 约束组 / 建议动作），
-//!   耗时只记录、不参与判定（计时天然非确定，供人观察与阶段B之后加权使用）；
-//! - 语料目录有内容哈希（FNV-64），谱系记录据此可复现对齐。
+//! 这是自进化闭环的 **fitness 来源**，判定分两层：
+//! - **行为**：退出码 / outcome / DOF / 冲突组 / 冗余组 / 建议动作做精确断言，
+//!   实体终态与关节变量按容差断言。语料冻结的是「求解器应当做什么」，
+//!   不冻结数值噪声——更快、更准的迭代策略不会被判为回退。
+//! - **确定性**：每个 case 运行两次，stdout / stderr / 退出码必须逐字节相同。
+//!   跨平台逐位一致由产品仓库的 parity 测试在 CI 架构矩阵上负责。
+//!
+//! 其余约定：求解器只以黑盒方式访问（`ansatz-cli solve` 子进程 + 超时），
+//! 演化产物绝不在本进程内执行；耗时只记录、不参与判定；语料目录有内容
+//! 哈希（FNV-64），谱系记录据此可复现对齐。
 //!
 //! 黄金 case 的期望值格式见 `evolve/corpus/README.md`；缺省字段即通配。
 
@@ -16,28 +20,43 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+pub mod geometry_check;
+
 /// 评测器版本标签，进谱系记录以便追溯「用哪一版判定规则得到的 fitness」。
 pub const VERSION_TAG: &str = env!("CARGO_PKG_VERSION");
 
+/// 实体终态与关节变量的缺省比较容差（绝对值）。
+pub const DEFAULT_VALUE_TOLERANCE: f64 = 1e-7;
+
 /// 单个 case 的期望（全部字段可选；未写出的字段视为通配）。
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Expected {
     #[serde(default)]
     pub description: Option<String>,
-    /// 期望的求解结局（converged / underconstrained / ...）。
+    /// 期望的求解结局（converged / inconsistent / not_converged）。
     #[serde(default)]
     pub outcome: Option<String>,
     #[serde(default)]
     pub dof_total: Option<u32>,
     #[serde(default)]
     pub dof_remaining: Option<u32>,
-    /// 期望的实体终态。x/y 为 IEEE 754 位模式的十六进制字符串（"0x…"），
-    /// 与产品 tests/parity 的约定一致——位级比较，不是 epsilon。
+    /// 期望的实体终态（按 `value_tolerance` 比较）。只应对解唯一的模型写出：
+    /// 欠约束模型的特解随迭代策略合法变化。
     #[serde(default)]
     pub entities: Vec<ExpectedEntity>,
-    /// 期望的冗余/冲突约束组（集合相等：多报、漏报都算失败）。
+    /// 期望的关节变量（按 `value_tolerance` 比较）。
     #[serde(default)]
-    pub redundant_constraint_ids: Vec<Vec<u32>>,
+    pub joints: Vec<ExpectedJoint>,
+    /// 实体与关节的比较容差；缺省 [`DEFAULT_VALUE_TOLERANCE`]。
+    #[serde(default)]
+    pub value_tolerance: Option<f64>,
+    /// 期望的冲突组（集合相等；`[]` 断言没有冲突）。
+    #[serde(default)]
+    pub conflict_constraint_ids: Option<Vec<Vec<u32>>>,
+    /// 期望的冗余组（集合相等；`[]` 断言没有冗余）。
+    #[serde(default)]
+    pub redundant_constraint_ids: Option<Vec<Vec<u32>>>,
     /// 期望出现的建议动作（子集匹配：报出更多、更聪明的建议不算失败）。
     /// 格式："remove_constraint:2" / "relax_constraint:7" / "add_constraint:1"。
     #[serde(default)]
@@ -48,26 +67,35 @@ pub struct Expected {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExpectedEntity {
     pub id: u32,
-    /// point2 终态位模式（"0x…"）。
+    /// point2 终态。
     #[serde(default)]
-    pub x: Option<String>,
+    pub x: Option<f64>,
     #[serde(default)]
-    pub y: Option<String>,
-    /// rigid3 终态位模式（平移 3 + 旋转向量 3）。
+    pub y: Option<f64>,
+    /// rigid3 终态（平移 3 + 旋转向量 3）。
     #[serde(default)]
     pub pose: Option<ExpectedPose>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExpectedPose {
-    pub tx: String,
-    pub ty: String,
-    pub tz: String,
-    pub rx: String,
-    pub ry: String,
-    pub rz: String,
+    pub tx: f64,
+    pub ty: f64,
+    pub tz: f64,
+    pub rx: f64,
+    pub ry: f64,
+    pub rz: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectedJoint {
+    pub constraint_id: u32,
+    pub value: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -119,10 +147,19 @@ pub fn run_suite(solver: &Path, corpus: &Path, timeout: Duration) -> SuiteReport
         .collect();
     case_dirs.sort(); // 确定性顺序
 
-    let version = probe_version(solver);
+    let version = probe_version(solver, timeout);
     let mut cases = Vec::with_capacity(case_dirs.len());
     for dir in &case_dirs {
         cases.push(run_case(solver, dir, timeout));
+    }
+    if cases.is_empty() {
+        cases.push(CaseReport {
+            id: "<empty-corpus>".into(),
+            status: "fail",
+            exit_code: None,
+            duration_ms: 0,
+            failures: vec!["语料目录没有任何 case，不能评定候选求解器".into()],
+        });
     }
     let passed = cases.iter().filter(|c| c.status == "pass").count();
     let failed = cases.len() - passed;
@@ -134,16 +171,12 @@ pub fn run_suite(solver: &Path, corpus: &Path, timeout: Duration) -> SuiteReport
         corpus: CorpusInfo {
             dir: corpus.to_path_buf(),
             hash: corpus_hash(corpus),
-            cases: cases.len(),
+            cases: case_dirs.len(),
         },
         summary: Summary {
             passed,
             failed,
-            pass_rate: if cases.is_empty() {
-                1.0
-            } else {
-                passed as f64 / cases.len() as f64
-            },
+            pass_rate: passed as f64 / cases.len() as f64,
         },
         cases,
     }
@@ -187,10 +220,10 @@ pub fn corpus_hash(corpus: &Path) -> u64 {
     state
 }
 
-fn probe_version(solver: &Path) -> Option<String> {
-    let out = Command::new(solver).arg("--version").output().ok()?;
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() {
+fn probe_version(solver: &Path, timeout: Duration) -> Option<String> {
+    let (exit_code, stdout, _, timed_out) = run_process(solver, "--version", None, timeout);
+    let s = stdout.trim().to_string();
+    if timed_out || exit_code != Some(0) || s.is_empty() {
         None
     } else {
         Some(s)
@@ -247,7 +280,24 @@ fn run_case(solver: &Path, case_dir: &Path, timeout: Duration) -> CaseReport {
         failures.push(format!("超时（>{timeout:?}）后被终止"));
     }
     if failures.is_empty() {
-        check(&expected, exit_code, &stdout, &stderr, &mut failures);
+        let (exit2, stdout2, stderr2, timed_out2) = run_solver(solver, &model, timeout);
+        if timed_out2 {
+            failures.push(format!("第二次运行超时（>{timeout:?}）"));
+        } else if (exit2, &stdout2, &stderr2) != (exit_code, &stdout, &stderr) {
+            failures.push(String::from(
+                "非确定性输出：同一输入运行两次，退出码或 stdout/stderr 不完全相同",
+            ));
+        }
+    }
+    if failures.is_empty() {
+        check(
+            &expected,
+            &model,
+            exit_code,
+            &stdout,
+            &stderr,
+            &mut failures,
+        );
     }
     let status = if failures.is_empty() { "pass" } else { "fail" };
     CaseReport {
@@ -266,8 +316,17 @@ fn run_solver(
     model: &str,
     timeout: Duration,
 ) -> (Option<i32>, String, String, bool) {
+    run_process(solver, "solve", Some(model), timeout)
+}
+
+fn run_process(
+    solver: &Path,
+    argument: &str,
+    input: Option<&str>,
+    timeout: Duration,
+) -> (Option<i32>, String, String, bool) {
     let mut child = match Command::new(solver)
-        .arg("solve")
+        .arg(argument)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -276,12 +335,19 @@ fn run_solver(
         Ok(c) => c,
         Err(e) => return (None, String::new(), format!("启动求解器失败：{e}"), false),
     };
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(model.as_bytes());
-    } // drop 关闭 stdin → 求解器读到 EOF
-
+    let stdin_pipe = child.stdin.take();
     let mut stdout_pipe = child.stdout.take().unwrap();
     let mut stderr_pipe = child.stderr.take().unwrap();
+    // A candidate may never read stdin. Writing a model larger than the pipe
+    // buffer synchronously would prevent the timeout loop from ever starting.
+    let input = input.map(str::to_owned);
+    let in_t = std::thread::spawn(move || {
+        if let Some(mut stdin) = stdin_pipe {
+            if let Some(input) = input {
+                let _ = stdin.write_all(input.as_bytes());
+            }
+        } // drop closes stdin so a well-behaved solver sees EOF.
+    });
     let out_t = std::thread::spawn(move || {
         let mut s = String::new();
         let _ = stdout_pipe.read_to_string(&mut s);
@@ -310,6 +376,7 @@ fn run_solver(
             Err(_) => break None,
         }
     };
+    let _ = in_t.join();
     let stdout = out_t.join().unwrap_or_default();
     let stderr = err_t.join().unwrap_or_default();
     (exit_code, stdout, stderr, timed_out)
@@ -317,6 +384,7 @@ fn run_solver(
 
 fn check(
     expected: &Expected,
+    model: &str,
     exit_code: Option<i32>,
     stdout: &str,
     stderr: &str,
@@ -327,13 +395,13 @@ fn check(
         if exit_code != Some(2) {
             failures.push(format!("期望工具错误（exit 2），实际退出码 {exit_code:?}"));
         }
-        match serde_json::from_str::<serde_json::Value>(stderr.trim()) {
+        if !stdout.trim().is_empty() {
+            failures.push("工具错误同时在 stdout 输出了报告".into());
+        }
+        match serde_json::from_str::<ansatz_core::ErrorPayload>(stderr.trim()) {
             Ok(err) => {
-                if err["kind"].as_str() != Some(kind.as_str()) {
-                    failures.push(format!(
-                        "期望错误 kind `{kind}`，实际 `{}`",
-                        err["kind"].as_str().unwrap_or("<非字符串>")
-                    ));
+                if err.kind != *kind {
+                    failures.push(format!("期望错误 kind `{kind}`，实际 `{}`", err.kind));
                 }
             }
             Err(e) => failures.push(format!("stderr 不是合法 JSON：{e}")),
@@ -347,6 +415,13 @@ fn check(
             "期望求解层退出码 0/1，实际 {exit_code:?}（stderr: {}）",
             stderr.trim()
         ));
+        return;
+    }
+    if !stderr.trim().is_empty() {
+        failures.push(format!("求解层报告同时写出 stderr：{}", stderr.trim()));
+    }
+    if let Err(errors) = geometry_check::parse_and_validate_report(model, stdout) {
+        failures.extend(errors);
         return;
     }
     let report: serde_json::Value = match serde_json::from_str(stdout) {
@@ -383,6 +458,11 @@ fn check(
             }
         }
     }
+    let tol = expected.value_tolerance.unwrap_or(DEFAULT_VALUE_TOLERANCE);
+    if !tol.is_finite() || tol < 0.0 {
+        failures.push(format!("期望文件的 value_tolerance 无效：{tol}"));
+        return;
+    }
     for ent in &expected.entities {
         let found = report["entities"].as_array().and_then(|arr| {
             arr.iter()
@@ -395,13 +475,19 @@ fn check(
         let geometry = &found["geometry"];
         match geometry["type"].as_str() {
             Some("point2") => {
-                for (axis, want_hex) in [("x", &ent.x), ("y", &ent.y)] {
-                    let Some(want_hex) = want_hex else { continue };
+                for (axis, want) in [("x", ent.x), ("y", ent.y)] {
+                    let Some(want) = want else { continue };
                     let Some(got) = geometry[axis].as_f64() else {
                         failures.push(format!("实体 {} 的 {axis} 不是数值", ent.id));
                         continue;
                     };
-                    check_bits(ent.id, axis, got, want_hex, failures);
+                    check_close(
+                        &format!("实体 {} 的 {axis}", ent.id),
+                        got,
+                        want,
+                        tol,
+                        failures,
+                    );
                 }
             }
             Some("rigid3") => {
@@ -414,19 +500,25 @@ fn check(
                 };
                 let pose = &geometry["pose"];
                 let fields = [
-                    ("tx", pose["translation"]["x"].as_f64(), &want_pose.tx),
-                    ("ty", pose["translation"]["y"].as_f64(), &want_pose.ty),
-                    ("tz", pose["translation"]["z"].as_f64(), &want_pose.tz),
-                    ("rx", pose["rotation"]["vector"][0].as_f64(), &want_pose.rx),
-                    ("ry", pose["rotation"]["vector"][1].as_f64(), &want_pose.ry),
-                    ("rz", pose["rotation"]["vector"][2].as_f64(), &want_pose.rz),
+                    ("tx", pose["translation"]["x"].as_f64(), want_pose.tx),
+                    ("ty", pose["translation"]["y"].as_f64(), want_pose.ty),
+                    ("tz", pose["translation"]["z"].as_f64(), want_pose.tz),
+                    ("rx", pose["rotation"]["vector"][0].as_f64(), want_pose.rx),
+                    ("ry", pose["rotation"]["vector"][1].as_f64(), want_pose.ry),
+                    ("rz", pose["rotation"]["vector"][2].as_f64(), want_pose.rz),
                 ];
-                for (field, got, want_hex) in fields {
+                for (field, got, want) in fields {
                     let Some(got) = got else {
                         failures.push(format!("实体 {} 的 {field} 不是数值", ent.id));
                         continue;
                     };
-                    check_bits(ent.id, field, got, want_hex, failures);
+                    check_close(
+                        &format!("实体 {} 的 {field}", ent.id),
+                        got,
+                        want,
+                        tol,
+                        failures,
+                    );
                 }
             }
             other => failures.push(format!(
@@ -436,35 +528,49 @@ fn check(
             )),
         }
     }
-    // 冗余/冲突组：集合相等（多报漏报都算行为变化）
-    if !expected.redundant_constraint_ids.is_empty() {
-        let mut got: Vec<Vec<u64>> = diag["redundant_constraints"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|g| {
-                        g["constraint_ids"]
-                            .as_array()
-                            .map(|ids| ids.iter().filter_map(|v| v.as_u64()).collect())
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let mut want: Vec<Vec<u64>> = expected
-            .redundant_constraint_ids
-            .iter()
-            .map(|g| g.iter().map(|&id| u64::from(id)).collect())
-            .collect();
-        for v in got.iter_mut() {
-            v.sort_unstable();
+    for want in &expected.joints {
+        let got = diag["joints"].as_array().and_then(|arr| {
+            arr.iter()
+                .find(|j| j["constraint_id"].as_u64() == Some(u64::from(want.constraint_id)))
+                .and_then(|j| j["value"].as_f64())
+        });
+        match got {
+            Some(got) => check_close(
+                &format!("关节 {} 的变量", want.constraint_id),
+                got,
+                want.value,
+                tol,
+                failures,
+            ),
+            None => failures.push(format!("报告中找不到关节 {} 的状态", want.constraint_id)),
         }
-        for v in want.iter_mut() {
-            v.sort_unstable();
-        }
-        got.sort_unstable();
-        want.sort_unstable();
+    }
+    // 冲突组 / 冗余组：集合相等（多报漏报都算行为变化）
+    for (key, label, want) in [
+        ("conflicts", "冲突组", &expected.conflict_constraint_ids),
+        (
+            "redundant_constraints",
+            "冗余组",
+            &expected.redundant_constraint_ids,
+        ),
+    ] {
+        let Some(want) = want else { continue };
+        let got = normalized_groups(diag[key].as_array().map(|arr| {
+            arr.iter()
+                .filter_map(|g| {
+                    g["constraint_ids"]
+                        .as_array()
+                        .map(|ids| ids.iter().filter_map(|v| v.as_u64()).collect())
+                })
+                .collect()
+        }));
+        let want = normalized_groups(Some(
+            want.iter()
+                .map(|g| g.iter().map(|&id| u64::from(id)).collect())
+                .collect(),
+        ));
         if got != want {
-            failures.push(format!("冗余/冲突约束组不符：期望 {want:?}，实际 {got:?}"));
+            failures.push(format!("{label}不符：期望 {want:?}，实际 {got:?}"));
         }
     }
     // 建议动作：子集匹配（允许未来报出更好的建议）
@@ -494,20 +600,142 @@ fn check(
     }
 }
 
-/// 位模式断言：期望十六进制 vs 实际 f64 的 to_bits。
-fn check_bits(entity_id: u32, field: &str, got: f64, want_hex: &str, failures: &mut Vec<String>) {
-    let want = hex_to_f64(want_hex);
-    if got.to_bits() != want.to_bits() {
+/// 组内与组间都排序，使比较与报告顺序无关。
+fn normalized_groups(groups: Option<Vec<Vec<u64>>>) -> Vec<Vec<u64>> {
+    let mut groups = groups.unwrap_or_default();
+    for g in groups.iter_mut() {
+        g.sort_unstable();
+    }
+    groups.sort_unstable();
+    groups
+}
+
+/// 容差断言：|got − want| ≤ tol。
+fn check_close(what: &str, got: f64, want: f64, tol: f64, failures: &mut Vec<String>) {
+    let diff = (got - want).abs();
+    if diff.is_nan() || diff > tol {
         failures.push(format!(
-            "实体 {} 的 {field} 位模式不符：期望 {want_hex}（{want}），实际 {:#018x}（{got}）",
-            entity_id,
-            got.to_bits()
+            "{what} 超出容差：期望 {want}，实际 {got}（差 {diff:e} > {tol:e}）"
         ));
     }
 }
 
-fn hex_to_f64(s: &str) -> f64 {
-    let bits = u64::from_str_radix(s.trim_start_matches("0x"), 16)
-        .unwrap_or_else(|e| panic!("期望文件中的位模式非法 `{s}`：{e}"));
-    f64::from_bits(bits)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MODEL: &str = r#"{"entities":[{"id":1,"geometry":{"type":"point2","x":3.0,"y":4.0}}],"constraints":[{"id":7,"kind":{"type":"distance","a":1,"b":null,"value":10.0}}]}"#;
+
+    fn report(x: f64, y: f64) -> String {
+        serde_json::json!({
+            "outcome":"converged",
+            "entities":[{"id":1,"geometry":{"type":"point2","x":x,"y":y}}],
+            "diagnostics":{
+                "dof_total":2,"dof_remaining":1,"iterations":0,"conflicts":[],
+                "redundant_constraints":[],
+                "residuals":[{"constraint_id":7,"residual":0.0,"human_message":"forged?"}],
+                "max_residual":{"constraint_id":7,"residual":0.0,"human_message":"forged?"},
+                "suggestions":[],"joints":[],"jacobian_condition_estimate":1.0
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn evaluator_entry_rejects_fake_convergence_without_expected_pose() {
+        let mut failures = Vec::new();
+        check(
+            &Expected::default(),
+            MODEL,
+            Some(0),
+            &report(3.0, 4.0),
+            "",
+            &mut failures,
+        );
+        assert!(
+            failures.iter().any(|e| e.contains("独立几何检查")),
+            "{failures:?}"
+        );
+        failures.clear();
+        check(
+            &Expected::default(),
+            MODEL,
+            Some(0),
+            &report(0.0, -10.0),
+            "",
+            &mut failures,
+        );
+        assert!(failures.is_empty(), "{failures:?}");
+    }
+
+    #[test]
+    fn evaluator_entry_rejects_incomplete_reports_and_incomplete_tool_errors() {
+        let mut failures = Vec::new();
+        check(
+            &Expected::default(),
+            MODEL,
+            Some(0),
+            r#"{"outcome":"converged","entities":[],"diagnostics":{"dof_total":2,"dof_remaining":1}}"#,
+            "",
+            &mut failures,
+        );
+        assert!(failures.iter().any(|e| e.contains("完整 JSON 契约")));
+        failures.clear();
+        let expected = Expected {
+            tool_error_kind: Some("invalid_json".into()),
+            ..Expected::default()
+        };
+        check(
+            &expected,
+            "{",
+            Some(2),
+            "",
+            r#"{"kind":"invalid_json"}"#,
+            &mut failures,
+        );
+        assert!(!failures.is_empty());
+    }
+
+    #[test]
+    fn empty_corpus_is_an_explicit_failure_not_a_perfect_score() {
+        let directory =
+            std::env::temp_dir().join(format!("ansatz-empty-corpus-{}", std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        let suite = run_suite(
+            Path::new("nonexistent-candidate-solver"),
+            &directory,
+            Duration::from_millis(20),
+        );
+        std::fs::remove_dir(&directory).unwrap();
+        assert_eq!(suite.corpus.cases, 0);
+        assert_eq!(suite.summary.passed, 0);
+        assert_eq!(suite.summary.failed, 1);
+        assert_eq!(suite.summary.pass_rate, 0.0);
+        assert!(suite.cases[0].failures[0].contains("没有任何 case"));
+    }
+
+    #[test]
+    fn subprocess_timeout_terminates_a_hanging_candidate() {
+        // Reuse this test executable as a dependency-free child fixture. Only
+        // the filtered child invocation sleeps; normal cargo test runs do not.
+        let executable = std::env::current_exe().unwrap();
+        let input = "x".repeat(256 * 1024);
+        let start = Instant::now();
+        let (exit, _, _, timed_out) = run_process(
+            &executable,
+            "tests::slow_process_fixture",
+            Some(&input),
+            Duration::from_millis(30),
+        );
+        assert!(timed_out);
+        assert_eq!(exit, None);
+        assert!(start.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn slow_process_fixture() {
+        if std::env::args().any(|arg| arg == "tests::slow_process_fixture") {
+            std::thread::sleep(Duration::from_secs(10));
+        }
+    }
 }

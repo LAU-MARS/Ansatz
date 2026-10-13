@@ -1,0 +1,10 @@
+{
+  "entities": [
+    { "id": 1, "geometry": { "type": "rigid3", "pose": { "translation": { "x": 0.0, "y": 0.0, "z": 0.0 }, "rotation": { "vector": [0.1, 0.2, 0.3] } } } }
+  ],
+  "constraints": [
+    { "id": 1, "kind": { "type": "mate", "a": 1, "b": 1,
+        "a_plane": { "origin": { "x": 0.0, "y": 0.0, "z": 0.0 }, "normal": { "x": 0.0, "y": 0.0, "z": 1.0 } },
+        "b_plane": { "origin": { "x": 0.0, "y": 0.0, "z": 1.0 }, "normal": { "x": 0.0, "y": 0.0, "z": 1.0 } } } }
+  ]
+}

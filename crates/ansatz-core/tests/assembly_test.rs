@@ -42,11 +42,15 @@ fn plane_json(origin: [f64; 3], normal: [f64; 3]) -> String {
     )
 }
 
+fn ids(groups: &[ansatz_core::ConstraintGroup]) -> Vec<Vec<u32>> {
+    groups.iter().map(|g| g.constraint_ids.clone()).collect()
+}
+
 #[test]
-fn unconstrained_rigid3_is_underconstrained() {
+fn unconstrained_rigid3_converges_with_free_dof() {
     let m = model(&two_bodies(FREE));
     let r = solve(&m).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained);
+    assert_eq!(r.outcome, SolveOutcome::Converged);
     assert_eq!(r.diagnostics.dof_total, 12);
     assert_eq!(r.diagnostics.dof_remaining, 6);
     assert!(r
@@ -68,7 +72,7 @@ fn single_mate_leaves_three_dof() {
         plane_json([0.0, 0.0, -0.5], [0.0, 0.0, -1.0]),
     );
     let r = solve(&model(&json)).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained);
+    assert_eq!(r.outcome, SolveOutcome::Converged);
     assert_eq!(r.diagnostics.dof_remaining, 3, "mate 应消去 3 个自由度");
     let mr = r.diagnostics.max_residual.as_ref().unwrap();
     assert!(mr.residual.abs() <= 1e-9, "残差应收敛：{mr:?}");
@@ -85,7 +89,7 @@ fn single_coaxial_leaves_two_dof() {
         axis_json([0.1, 0.2, 0.3], [0.1, 0.2, 1.0]),
     );
     let r = solve(&model(&json)).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained);
+    assert_eq!(r.outcome, SolveOutcome::Converged);
     assert_eq!(r.diagnostics.dof_remaining, 2, "coaxial 应消去 4 个自由度");
     let mr = r.diagnostics.max_residual.as_ref().unwrap();
     assert!(mr.residual.abs() <= 1e-9, "残差应收敛：{mr:?}");
@@ -140,9 +144,10 @@ fn shaft_fully_converged() {
     );
 }
 
-/// mate + coaxial 同对施加：7 个方程、秩 6 → 1 个冗余。
+/// mate + coaxial 同对施加：mate 的姿态行与 coaxial 重叠，但两者各自
+/// 仍贡献独立的秩，所以都不可删——部分重叠不是冗余。
 #[test]
-fn mate_plus_coaxial_is_overconstrained() {
+fn mate_plus_coaxial_partial_overlap_is_not_redundant() {
     let json = format!(
         r#"{{"entities":[{BASE},{FREE}],"constraints":[
             {{"id":90,"kind":{{"type":"fixed","a":1}}}},
@@ -157,9 +162,8 @@ fn mate_plus_coaxial_is_overconstrained() {
     );
     let r = solve(&model(&json)).unwrap();
     // 数学事实：coaxial 消 4（横向 2 + 姿态 2），mate 的法向沿轴时其姿态
-    // 行与 coaxial 重叠、只剩轴向偏移 1 → 共消 5；绕轴转动仍自由 → 欠约束 1。
-    // 块级贪心冗余判定不报「块内部分冗余」（mate 的 4 行仍带来秩 1）。
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained);
+    // 行与 coaxial 重叠、只剩轴向偏移 1 → 共消 5；绕轴转动仍自由 → 剩 1。
+    assert_eq!(r.outcome, SolveOutcome::Converged);
     assert_eq!(r.diagnostics.dof_remaining, 1);
     assert!(r.diagnostics.redundant_constraints.is_empty());
     let mr = r.diagnostics.max_residual.as_ref().unwrap();
@@ -167,7 +171,7 @@ fn mate_plus_coaxial_is_overconstrained() {
 }
 
 #[test]
-fn duplicate_distance_is_overconstrained_but_satisfiable() {
+fn duplicate_distance_is_redundant_but_converged() {
     let json = format!(
         r#"{{"entities":[{BASE},{FREE}],"constraints":[
             {{"id":90,"kind":{{"type":"fixed","a":1}}}},
@@ -175,18 +179,60 @@ fn duplicate_distance_is_overconstrained_but_satisfiable() {
             {{"id":2,"kind":{{"type":"distance","a":1,"b":2,"value":2.0}}}}]}}"#
     );
     let r = solve(&model(&json)).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Overconstrained);
+    assert_eq!(r.outcome, SolveOutcome::Converged);
     assert_eq!(r.diagnostics.dof_remaining, 5, "2 个距离约束秩 1");
-    assert!(r
-        .diagnostics
-        .redundant_constraints
-        .iter()
-        .any(|g| g.constraint_ids == vec![2]));
+    assert_eq!(ids(&r.diagnostics.redundant_constraints), vec![vec![1, 2]]);
     assert!(r
         .diagnostics
         .suggestions
         .iter()
         .any(|s| matches!(s.action, Action::RemoveConstraint { id: 2 })));
+}
+
+/// 冗余组与约束书写顺序无关：调换顺序得到同一组（旧的贪心判定会改口）。
+#[test]
+fn redundancy_groups_do_not_depend_on_constraint_order() {
+    let dist =
+        |id: u32| format!(r#"{{"id":{id},"kind":{{"type":"distance","a":2,"b":1,"value":2.0}}}}"#);
+    let coax = format!(
+        r#"{{"id":5,"kind":{{"type":"coaxial","a":1,"b":2,"a_axis":{},"b_axis":{}}}}}"#,
+        axis_json([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+        axis_json([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+    );
+    let run = |order: [&str; 4]| {
+        let json = format!(
+            r#"{{"entities":[{BASE},{FREE}],"constraints":[
+                {{"id":90,"kind":{{"type":"fixed","a":1}}}},{},{},{},{}]}}"#,
+            order[0], order[1], order[2], order[3]
+        );
+        let r = solve(&model(&json)).unwrap();
+        let mut groups = ids(&r.diagnostics.redundant_constraints);
+        for g in &mut groups {
+            g.sort_unstable();
+        }
+        groups.sort();
+        groups
+    };
+    let (d1, d2, d3) = (dist(1), dist(2), dist(3));
+    let forward = run([&d1, &d2, &d3, &coax]);
+    let backward = run([&coax, &d3, &d2, &d1]);
+    assert_eq!(forward, vec![vec![1, 2, 3]], "三条相同距离应归为一组");
+    assert_eq!(forward, backward);
+}
+
+#[test]
+fn duplicate_fixed_is_redundant() {
+    let json = format!(
+        r#"{{"entities":[{BASE},{FREE}],"constraints":[
+            {{"id":90,"kind":{{"type":"fixed","a":1}}}},
+            {{"id":91,"kind":{{"type":"fixed","a":1}}}}]}}"#
+    );
+    let r = solve(&model(&json)).unwrap();
+    assert_eq!(r.outcome, SolveOutcome::Converged);
+    assert_eq!(
+        ids(&r.diagnostics.redundant_constraints),
+        vec![vec![90, 91]]
+    );
 }
 
 #[test]
@@ -199,15 +245,81 @@ fn conflicting_distances_are_inconsistent() {
     );
     let r = solve(&model(&json)).unwrap();
     assert_eq!(r.outcome, SolveOutcome::Inconsistent);
-    assert_eq!(
-        r.diagnostics.redundant_constraints[0].constraint_ids,
-        vec![1, 2]
-    );
+    assert_eq!(ids(&r.diagnostics.conflicts), vec![vec![1, 2]]);
+    assert!(r.diagnostics.redundant_constraints.is_empty());
     assert!(r
         .diagnostics
         .suggestions
         .iter()
         .any(|s| matches!(s.action, Action::RemoveConstraint { id: 2 })));
+}
+
+/// 同一对刚体、不同锚点的两条距离可以同时满足——旧实现按刚体对分组，
+/// 忽略锚点，会误报冲突。
+#[test]
+fn anchored_distances_on_same_pair_are_not_conflicting() {
+    let json = format!(
+        r#"{{"entities":[{BASE},{FREE}],"constraints":[
+            {{"id":90,"kind":{{"type":"fixed","a":1}}}},
+            {{"id":1,"kind":{{"type":"distance","a":2,"b":1,"value":2.0}}}},
+            {{"id":2,"kind":{{"type":"distance","a":2,"b":1,"value":2.5,
+                "a_anchor":{{"x":0.0,"y":0.0,"z":0.5}}}}}}]}}"#
+    );
+    let r = solve(&model(&json)).unwrap();
+    assert_eq!(r.outcome, SolveOutcome::Converged);
+    assert!(r.diagnostics.conflicts.is_empty());
+    let mr = r.diagnostics.max_residual.as_ref().unwrap();
+    assert!(mr.residual.abs() <= 1e-9, "{mr:?}");
+}
+
+/// 非线性冲突：B 的原点被 coaxial 拉到基座 z 轴上，又被 spherical 钉在
+/// 轴外的点 (1,0,0)。局部停滞不作为全局无解证明。
+#[test]
+fn coaxial_vs_offaxis_spherical_is_not_converged_without_a_proof() {
+    let json = format!(
+        r#"{{"entities":[{BASE},{FREE}],"constraints":[
+            {{"id":90,"kind":{{"type":"fixed","a":1}}}},
+            {{"id":1,"kind":{{"type":"coaxial","a":1,"b":2,"a_axis":{},"b_axis":{}}}}},
+            {{"id":2,"kind":{{"type":"spherical","a":1,"b":2,
+                "a_point":{{"x":1.0,"y":0.0,"z":0.0}},"b_point":{{"x":0.0,"y":0.0,"z":0.0}}}}}}]}}"#,
+        axis_json([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+        axis_json([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+    );
+    let r = solve(&model(&json)).unwrap();
+    assert_eq!(r.outcome, SolveOutcome::NotConverged);
+    assert!(r.diagnostics.conflicts.is_empty());
+}
+
+/// 迭代被截断时不臆断冲突：报 not_converged，冲突组为空。
+#[test]
+fn truncated_iterations_report_not_converged() {
+    let json = format!(
+        r#"{{"entities":[{BASE},{FREE}],"constraints":[
+            {{"id":90,"kind":{{"type":"fixed","a":1}}}},
+            {{"id":1,"kind":{{"type":"coaxial","a":1,"b":2,"a_axis":{},"b_axis":{}}}}}],
+          "params":{{"max_iterations":1}}}}"#,
+        axis_json([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+        axis_json([0.1, 0.2, 0.3], [0.1, 0.2, 1.0]),
+    );
+    let r = solve(&model(&json)).unwrap();
+    assert_eq!(r.outcome, SolveOutcome::NotConverged);
+    assert_eq!(r.diagnostics.iterations, 1);
+    assert!(r.diagnostics.conflicts.is_empty());
+}
+
+#[test]
+fn same_body_constraint_rejected() {
+    let json = format!(
+        r#"{{"entities":[{BASE},{FREE}],"constraints":[
+            {{"id":1,"kind":{{"type":"mate","a":2,"b":2,
+                "a_plane":{},"b_plane":{}}}}}]}}"#,
+        plane_json([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+        plane_json([0.0, 0.0, 1.0], [0.0, 0.0, 1.0]),
+    );
+    match solve(&model(&json)) {
+        Err(SolveError::InvalidModel { reason }) => assert!(reason.contains("两个不同的刚体")),
+        other => panic!("期望 InvalidModel，得到 {other:?}"),
+    }
 }
 
 #[test]
@@ -218,6 +330,7 @@ fn negative_distance_is_inconsistent() {
     );
     let r = solve(&model(&json)).unwrap();
     assert_eq!(r.outcome, SolveOutcome::Inconsistent);
+    assert_eq!(ids(&r.diagnostics.conflicts), vec![vec![7]]);
     assert!(r
         .diagnostics
         .suggestions
@@ -239,6 +352,7 @@ fn all_fixed_unsatisfiable_mate_is_inconsistent() {
     );
     let r = solve(&model(&json)).unwrap();
     assert_eq!(r.outcome, SolveOutcome::Inconsistent);
+    assert_eq!(ids(&r.diagnostics.conflicts), vec![vec![1]]);
     let mr = r.diagnostics.max_residual.as_ref().unwrap();
     assert!(
         mr.residual > 1e-6,
@@ -358,25 +472,6 @@ fn unknown_entity_rejected() {
     }
 }
 
-#[test]
-fn underconstrained_rejected_returns_input_poses() {
-    let json = format!(
-        r#"{{"entities":[{BASE},{FREE}],"constraints":[
-            {{"id":90,"kind":{{"type":"fixed","a":1}}}},
-            {{"id":1,"kind":{{"type":"distance","a":2,"b":1,"value":2.0}}}}],
-        "params":{{"allow_underconstrained":false}}}}"#
-    );
-    let r = solve(&model(&json)).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained);
-    let pose = match &r.entities[1].geometry {
-        ansatz_core::Geometry::Rigid3 { pose } => pose,
-        _ => panic!(),
-    };
-    // 原样返回输入位姿
-    assert_eq!(pose.translation.x, 0.5);
-    assert_eq!(pose.rotation.vector[1], -0.2);
-}
-
 /// 三体链式装配：基座—连杆—连杆，coaxial 相连 → 各留 2 DOF，共 4。
 #[test]
 fn three_body_chain_counts_dof() {
@@ -394,7 +489,7 @@ fn three_body_chain_counts_dof() {
         axis_json([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
     );
     let r = solve(&model(&json)).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained);
+    assert_eq!(r.outcome, SolveOutcome::Converged);
     assert_eq!(r.diagnostics.dof_total, 18);
     assert_eq!(
         r.diagnostics.dof_remaining, 4,

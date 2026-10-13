@@ -1,0 +1,9 @@
+{
+  "description": "同一对刚体、不同锚点的两条距离（2.0 与 2.5）可以同时满足，不得误报冲突",
+  "outcome": "converged",
+  "dof_total": 12,
+  "dof_remaining": 4,
+  "conflict_constraint_ids": [],
+  "redundant_constraint_ids": [],
+  "suggestion_actions": ["add_constraint:4"]
+}

@@ -1,0 +1,12 @@
+{
+  "description": "同轴要求同向：双方固定的反向轴是可证明矛盾，不能以叉积零误报收敛",
+  "outcome": "inconsistent",
+  "dof_total": 12,
+  "dof_remaining": 0,
+  "conflict_constraint_ids": [
+    [
+      1
+    ]
+  ],
+  "redundant_constraint_ids": []
+}

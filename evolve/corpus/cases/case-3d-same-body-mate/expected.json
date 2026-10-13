@@ -1,0 +1,4 @@
+{
+  "description": "两体约束的 a 与 b 是同一个刚体：模型无效（工具错误路径），不得进入求解",
+  "tool_error_kind": "invalid_model"
+}

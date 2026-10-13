@@ -19,7 +19,6 @@
     "params": {
       "$ref": "#/$defs/SolveParams",
       "default": {
-        "allow_underconstrained": true,
         "max_iterations": 100,
         "tolerance": 1e-9
       }
@@ -74,7 +73,7 @@
       ]
     },
     "ConstraintKind": {
-      "description": "约束种类与参数。\n\n2D 草图约束与 3D 装配约束共用本枚举。骨架阶段的求解器只支持\n[`ConstraintKind::Distance`] 的 `b = None`（到原点）形式，其余类型\n会被 [`crate::solve`](crate::solver::solve) 以\n[`SolveError::UnsupportedConstraint`](crate::report::SolveError::UnsupportedConstraint)\n拒绝——这是「能力未实现」的工具级错误，不是求解失败。",
+      "description": "约束种类与参数。\n\n2D 草图约束与 3D 装配约束共用本枚举。2D 路径目前只支持\n[`ConstraintKind::Distance`] 的 `b = None`（到原点）形式；3D 路径支持\ndistance / angle / fixed / mate / coaxial / 关节族 / transmission。\n其余组合会被 [`crate::solve`](crate::solver::solve) 以\n[`SolveError::UnsupportedConstraint`](crate::report::SolveError::UnsupportedConstraint)\n拒绝——这是「能力未实现」的工具级错误，不是求解失败。",
       "oneOf": [
         {
           "description": "两实体重合（点-点，或点落在曲线/曲面上）。",
@@ -268,7 +267,7 @@
           ]
         },
         {
-          "description": "角度（弧度）。2D：`b = None` 表示相对参考系（未实现）。\n3D 装配：a、b 为两个 Rigid3，`a_dir`/`b_dir` 为各自体坐标系内的参考方向\n（不必单位化），残差为 `dot(R_a·a_dir, R_b·b_dir) − cos(value)`。",
+          "description": "角度（弧度）。2D：`b = None` 表示相对参考系（未实现）。\n3D 装配：a、b 为两个 Rigid3，`a_dir`/`b_dir` 为非零参考方向\n（求解时归一化）。容差按真实夹角误差（弧度）检查；0/π 的方向对齐\n消去两个转动自由度，其他角度通常消去一个。",
           "type": "object",
           "properties": {
             "a": {
@@ -445,7 +444,7 @@
           ]
         },
         {
-          "description": "3D 装配：**转动副**（revolute）——同轴 + 轴向锚点间距锁定，\n消 5 留 1（绕轴转动）。`offset` 为两轴原点沿轴的间距（缺省 0）；\n`drive` 给出关节角目标（弧度，0 = 输入位形处的相对转角，\n即以初始装配为标定零位），施加后关节完全确定。",
+          "description": "3D 装配：**转动副**（revolute）——同轴 + 轴向锚点间距锁定，\n消 5 留 1（绕轴转动）。`offset` 为两轴原点沿轴的间距（缺省 0）。\n\n关节角 θ 是**位姿的函数**：从 `R_a·a_ref` 绕 a 轴转到 `R_b·b_ref` 的\n有向角，取主值 (−π, π]。`a_ref`/`b_ref` 是各自体坐标系内的零位参考\n方向（会被投影到垂直于轴的平面再归一）；缺省时按轴方向确定性地选取。\n`drive` 是 θ 的绝对目标（弧度），因此把求解结果原样再解一次不会移动。",
           "type": "object",
           "properties": {
             "a": {
@@ -456,6 +455,16 @@
             "a_axis": {
               "$ref": "#/$defs/Axis3"
             },
+            "a_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Vec3"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "b": {
               "type": "integer",
               "format": "uint32",
@@ -463,6 +472,16 @@
             },
             "b_axis": {
               "$ref": "#/$defs/Axis3"
+            },
+            "b_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Vec3"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "drive": {
               "type": [
@@ -493,7 +512,7 @@
           ]
         },
         {
-          "description": "3D 装配：**圆柱副**（cylindrical）——同轴，消 4 留 2\n（沿轴滑动 + 绕轴转动）。等价于 coaxial，语义别名，诊断按关节报告。",
+          "description": "3D 装配：**圆柱副**（cylindrical）——同轴，消 4 留 2\n（沿轴滑动 + 绕轴转动）。约束行与 coaxial 相同，诊断按关节报告 θ，\nθ 的定义与零位参考同 revolute。",
           "type": "object",
           "properties": {
             "a": {
@@ -504,6 +523,16 @@
             "a_axis": {
               "$ref": "#/$defs/Axis3"
             },
+            "a_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Vec3"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "b": {
               "type": "integer",
               "format": "uint32",
@@ -511,6 +540,16 @@
             },
             "b_axis": {
               "$ref": "#/$defs/Axis3"
+            },
+            "b_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Vec3"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "type": {
               "type": "string",
@@ -527,7 +566,7 @@
           ]
         },
         {
-          "description": "3D 装配：**移动副**（prismatic）——圆柱副 + 姿态滚转锁定，\n消 5 留 1（沿轴平动）。滚转通过一对垂直于轴的参考方向锁定\n（`roll` 为其夹角目标，弧度；参考方向缺省时退化为圆柱副）。\n`drive` 为关节平动目标（沿轴位移，0 = 初始位形处锚点轴向间距）。",
+          "description": "3D 装配：**移动副**（prismatic）——圆柱副 + 姿态滚转锁定，\n消 5 留 1（沿轴平动）。滚转通过一对垂直于轴的参考方向锁定\n（`roll` 为绕 a 轴的有向夹角目标，取 [0, π]，弧度）。\na_ref/b_ref/roll 必须一起给出；全部缺省则确定性选取参考方向并锁定 roll=0。\n参考方向先投影到各自轴的法平面并归一化。\n关节变量 δ = (b 轴原点 − a 轴原点)·(a 轴方向)，世界系下的有向距离；\n`drive` 是 δ 的绝对目标。",
           "type": "object",
           "properties": {
             "a": {
@@ -631,7 +670,7 @@
           ]
         },
         {
-          "description": "3D 装配：**传动耦合**（齿轮/带轮）——两个已存在的 revolute 关节的\n关节变量按速比联动：`(θ_b − θ_b₀) = ratio · (θ_a − θ_a₀)`（θ₀ 为\n初始位形处的关节变量）。`joint_a`/`joint_b` 是 revolute 约束的 id。",
+          "description": "3D 装配：**传动耦合**（齿轮/带轮）——两个已存在的 revolute 关节的\n关节变量按速比联动：`θ_b = ratio · θ_a`（θ 为 revolute 文档定义的\n绝对关节角；残差折回 (−π, π]）。两个关节的零位由各自的\n`a_ref`/`b_ref` 决定。`joint_a`/`joint_b` 是两个不同 revolute 约束的 id。",
           "type": "object",
           "properties": {
             "joint_a": {
@@ -684,7 +723,7 @@
       ]
     },
     "Geometry": {
-      "description": "几何实体。每个变体自带全部几何参数（骨架阶段不做参数共享/引用式建模）。",
+      "description": "几何实体。每个变体自带全部几何参数（不做参数共享/引用式建模）。",
       "oneOf": [
         {
           "description": "平面上的点（2 DOF）。",
@@ -862,7 +901,7 @@
       ]
     },
     "Rotation3": {
-      "description": "3D 旋转的参数化：**指数映射（旋转向量）** `v = θ·û`。\n\n# 为什么选指数映射而不是四元数\n\n- 四元数是 4 参数表示 3 个自由度，求解时必须额外引入单位范数约束，\n  等于给系统加了一个非线性方程；且其雅可比存在冗余列，牛顿类求解器\n  的法方程矩阵 `JᵀJ` 必然奇异，需要额外的流形投影/正交化处理。\n- 指数映射是**最小参数化**（3 参数 ↔ 3 自由度）：无冗余列、无额外约束，\n  `θ → 0` 时 `v → 0` 连续，没有四元数的 ±q 双重覆盖问题，也没有\n  欧拉角的万向锁。\n\n# 切换抽象点\n\n本类型是旋转参数化的唯一入口：求解器只经由 `Rotation3`（及其未来的\n切空间/雅可比接口）访问旋转，不直接触碰内部表示。若后续需要换成\n四元数 + 流形投影等表示，只需替换本结构体与对应的导数实现，\n数据模型其余部分不动。",
+      "description": "3D 旋转的参数化：**指数映射（旋转向量）** `v = θ·û`。\n\nJSON 使用紧凑的三维旋转向量。它是姿态存储格式，并非全局无奇异\n的求解坐标：2π 等位置的全局参数雅可比会退化。\n求解内部采用三维 SO(3) 局部增量并复合旋转，DOF 分析也使用该切空间。\n四元数存储配合三维局部增量同样无需添加单位范数约束。\n\n# 切换抽象点\n\n本类型是旋转参数化的唯一入口：求解器只经由 `Rotation3`（及其未来的\n切空间/雅可比接口）访问旋转，不直接触碰内部表示。若后续需要换成\n四元数 + 流形投影等表示，只需替换本结构体与对应的导数实现，\n数据模型其余部分不动。",
       "type": "object",
       "properties": {
         "vector": {
@@ -885,20 +924,15 @@
       "description": "求解参数。",
       "type": "object",
       "properties": {
-        "allow_underconstrained": {
-          "description": "是否接受欠约束解：为 `true` 时报告 `Underconstrained` 并附特解；\n为 `false` 时同样报告 `Underconstrained`，但实体原样返回输入。",
-          "type": "boolean",
-          "default": true
-        },
         "max_iterations": {
-          "description": "最大迭代数（骨架阶段闭式解不迭代，字段保留为契约的一部分）。",
+          "description": "3D 路径 LM 的最大迭代数（2D 闭式路径不迭代）。",
           "type": "integer",
           "format": "uint32",
           "default": 100,
           "minimum": 0
         },
         "tolerance": {
-          "description": "绝对容差：同时用作残差收敛判据与「距离值是否一致」的冲突判据。",
+          "description": "正有限绝对容差：长度按长度单位，角度按弧度检查。\n同锚点距离仅在各自容差区间不相交时判为已证实冲突。",
           "type": "number",
           "format": "double",
           "default": 1e-9

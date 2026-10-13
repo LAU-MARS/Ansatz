@@ -22,7 +22,8 @@ fn closed_form_exact_3_4_5() {
             "constraints":[{"id":1,"kind":{"type":"distance","a":1,"b":null,"value":10.0}}]}"#,
     );
     let r = solve(&m).expect("平凡算例必须可解");
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained); // 2 DOF - 1 约束 = 1
+    // 约束满足即 converged；欠约束是正交的事实：2 DOF - 1 约束 = 1
+    assert_eq!(r.outcome, SolveOutcome::Converged);
     let (x, y) = point(&r);
     assert_eq!(
         (x.to_bits(), y.to_bits()),
@@ -44,6 +45,20 @@ fn closed_form_exact_3_4_5() {
 }
 
 #[test]
+fn irrational_normalize_satisfies_distance() {
+    // (1,1) 归一化到距离 1：走真实 sqrt/除法 的非精确路径。
+    let m = model(
+        r#"{"entities":[{"id":1,"geometry":{"type":"point2","x":1.0,"y":1.0}}],
+            "constraints":[{"id":1,"kind":{"type":"distance","a":1,"b":null,"value":1.0}}]}"#,
+    );
+    let r = solve(&m).unwrap();
+    assert_eq!(r.outcome, SolveOutcome::Converged);
+    let (x, y) = point(&r);
+    let half_sqrt2 = core::f64::consts::FRAC_1_SQRT_2;
+    assert!((x - half_sqrt2).abs() < 1e-15 && (y - half_sqrt2).abs() < 1e-15);
+}
+
+#[test]
 fn conflicting_distances_are_inconsistent() {
     let m = model(
         r#"{"entities":[{"id":1,"geometry":{"type":"point2","x":3.0,"y":4.0}}],
@@ -53,10 +68,8 @@ fn conflicting_distances_are_inconsistent() {
     );
     let r = solve(&m).expect("冲突属于求解层结论，不是工具错误");
     assert_eq!(r.outcome, SolveOutcome::Inconsistent);
-    assert_eq!(
-        r.diagnostics.redundant_constraints[0].constraint_ids,
-        vec![1, 2]
-    );
+    assert_eq!(r.diagnostics.conflicts[0].constraint_ids, vec![1, 2]);
+    assert!(r.diagnostics.redundant_constraints.is_empty());
     assert!(r
         .diagnostics
         .suggestions
@@ -77,13 +90,8 @@ fn negative_distance_is_inconsistent() {
     );
     let r = solve(&m).unwrap();
     assert_eq!(r.outcome, SolveOutcome::Inconsistent);
-    assert_eq!(
-        r.diagnostics.redundant_constraints[0].constraint_ids,
-        vec![7]
-    );
-    assert!(r.diagnostics.redundant_constraints[0]
-        .human_message
-        .contains("负值"));
+    assert_eq!(r.diagnostics.conflicts[0].constraint_ids, vec![7]);
+    assert!(r.diagnostics.conflicts[0].human_message.contains("负值"));
     assert!(r
         .diagnostics
         .suggestions
@@ -92,7 +100,7 @@ fn negative_distance_is_inconsistent() {
 }
 
 #[test]
-fn duplicate_distances_are_overconstrained_but_satisfiable() {
+fn duplicate_distances_are_redundant_but_converged() {
     let m = model(
         r#"{"entities":[{"id":1,"geometry":{"type":"point2","x":0.0,"y":2.0}}],
             "constraints":[
@@ -100,11 +108,17 @@ fn duplicate_distances_are_overconstrained_but_satisfiable() {
               {"id":2,"kind":{"type":"distance","a":1,"b":null,"value":2.0},"label":"重复"}]}"#,
     );
     let r = solve(&m).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Overconstrained);
+    assert_eq!(r.outcome, SolveOutcome::Converged);
+    assert!(r.diagnostics.conflicts.is_empty());
     assert_eq!(
         r.diagnostics.redundant_constraints[0].constraint_ids,
         vec![1, 2]
     );
+    assert!(r
+        .diagnostics
+        .suggestions
+        .iter()
+        .any(|s| matches!(s.action, Action::RemoveConstraint { id: 2 })));
     // 仍然给出满足全部约束的特解 (0,2)
     let (x, y) = point(&r);
     assert_eq!(
@@ -210,19 +224,11 @@ fn duplicate_ids_are_invalid_model() {
 }
 
 #[test]
-fn underconstrained_rejected_returns_input_entities() {
-    let m = model(
-        r#"{"entities":[{"id":1,"geometry":{"type":"point2","x":3.0,"y":4.0}}],
-            "constraints":[{"id":1,"kind":{"type":"distance","a":1,"b":null,"value":10.0}}],
-            "params":{"tolerance":1e-9,"max_iterations":100,"allow_underconstrained":false}}"#,
+fn removed_allow_underconstrained_param_is_rejected() {
+    let r: Result<Model, _> = serde_json::from_str(
+        r#"{"entities":[],"constraints":[],"params":{"allow_underconstrained":false}}"#,
     );
-    let r = solve(&m).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained);
-    let (x, y) = point(&r); // 不接受特解：原样返回
-    assert_eq!(
-        (x.to_bits(), y.to_bits()),
-        (3.0f64.to_bits(), 4.0f64.to_bits())
-    );
+    assert!(r.is_err(), "0.4 起该参数已移除，deny_unknown_fields 应拒绝");
 }
 
 #[test]
@@ -232,7 +238,7 @@ fn degenerate_point_at_origin_uses_deterministic_fallback() {
             "constraints":[{"id":1,"kind":{"type":"distance","a":1,"b":null,"value":5.0}}]}"#,
     );
     let r = solve(&m).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained);
+    assert_eq!(r.outcome, SolveOutcome::Converged);
     let (x, y) = point(&r); // 方向退化 → 按 +x 轴取特解
     assert_eq!(
         (x.to_bits(), y.to_bits()),
@@ -250,7 +256,7 @@ fn unconstrained_rigid3_counts_six_dof() {
             "constraints":[]}"#,
     );
     let r = solve(&m).unwrap();
-    assert_eq!(r.outcome, SolveOutcome::Underconstrained);
+    assert_eq!(r.outcome, SolveOutcome::Converged);
     assert_eq!(
         (r.diagnostics.dof_total, r.diagnostics.dof_remaining),
         (6, 6)
@@ -271,7 +277,12 @@ fn serde_shapes_roundtrip() {
     );
     let r = solve(&m).unwrap();
     let json = serde_json::to_value(&r).unwrap();
-    assert_eq!(json["outcome"], "underconstrained");
+    assert_eq!(json["outcome"], "converged");
+    assert_eq!(json["diagnostics"]["iterations"], 0);
+    assert!(json["diagnostics"]["conflicts"]
+        .as_array()
+        .unwrap()
+        .is_empty());
     assert_eq!(json["entities"][0]["geometry"]["type"], "point2");
     assert_eq!(json["diagnostics"]["dof_remaining"], 1);
     assert_eq!(

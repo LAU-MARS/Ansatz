@@ -1,0 +1,6 @@
+{
+  "description": "方向向量不必单位化：两个 (2,0,0) 的夹角是 0，不是残差 3",
+  "outcome": "converged",
+  "dof_total": 12,
+  "conflict_constraint_ids": []
+}

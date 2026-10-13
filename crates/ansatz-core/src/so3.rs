@@ -96,6 +96,48 @@ pub fn right_jacobian(omega: [f64; 3]) -> Mat3 {
 /// 小角度级数切换阈值（平方前）；固定常量保证确定性。
 const SERIES_SWITCH: f64 = 1e-4;
 
+/// Right-multiply a pose by a three-dimensional local rotation increment.
+/// The JSON pose remains a rotation vector; optimization never differentiates
+/// its global chart. An exact zero increment preserves the input bits.
+pub fn retract(omega: [f64; 3], delta: [f64; 3]) -> [f64; 3] {
+    if delta == [0.0; 3] {
+        return omega;
+    }
+    fn quaternion(v: [f64; 3]) -> [f64; 4] {
+        let theta = v3::norm(v);
+        if theta == 0.0 {
+            return [1.0, 0.0, 0.0, 0.0];
+        }
+        let half = theta / 2.0;
+        let s = libm::sin(half);
+        [
+            libm::cos(half),
+            (v[0] / theta) * s,
+            (v[1] / theta) * s,
+            (v[2] / theta) * s,
+        ]
+    }
+    let a = quaternion(omega);
+    let b = quaternion(delta);
+    let mut q = [
+        a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3],
+        a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2],
+        a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1],
+        a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0],
+    ];
+    if q[0] < 0.0 {
+        for v in &mut q {
+            *v = -*v;
+        }
+    }
+    let s = v3::norm([q[1], q[2], q[3]]);
+    if s == 0.0 {
+        return [0.0; 3];
+    }
+    let angle = 2.0 * libm::atan2(s, q[0]);
+    [(q[1] / s) * angle, (q[2] / s) * angle, (q[3] / s) * angle]
+}
+
 /// 三维点/向量便捷运算（避免引入外部线性代数 crate）。
 pub mod v3 {
     /// 点积。
@@ -124,6 +166,6 @@ pub mod v3 {
     }
     /// 欧几里得范数（libm::sqrt，确定性）。
     pub fn norm(a: [f64; 3]) -> f64 {
-        libm::sqrt(dot(a, a))
+        libm::hypot(libm::hypot(a[0], a[1]), a[2])
     }
 }

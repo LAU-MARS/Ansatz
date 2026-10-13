@@ -1,0 +1,44 @@
+{
+  "description": "Default zero-roll prismatic at equivalent full-turn rotation: local DOF and unchanged input bits",
+  "outcome": "converged",
+  "dof_total": 12,
+  "dof_remaining": 0,
+  "entities": [
+    {
+      "id": 1,
+      "pose": {
+        "tx": "0x0000000000000000",
+        "ty": "0x0000000000000000",
+        "tz": "0x0000000000000000",
+        "rx": "0x0000000000000000",
+        "ry": "0x0000000000000000",
+        "rz": "0x0000000000000000"
+      }
+    },
+    {
+      "id": 2,
+      "pose": {
+        "tx": "0x0000000000000000",
+        "ty": "0x0000000000000000",
+        "tz": "0x0000000000000000",
+        "rx": "0x0000000000000000",
+        "ry": "0x0000000000000000",
+        "rz": "0x401921FB54442D18"
+      }
+    }
+  ],
+  "max_residual_abs": "0x3CB1A62633145C07",
+  "jacobian_condition_estimate": "0x3FF0000000000002",
+  "residuals": [
+    {
+      "constraint_id": 1,
+      "residual": "0x3CB1A62633145C07"
+    }
+  ],
+  "joints": [
+    {
+      "constraint_id": 1,
+      "value": "0x0000000000000000"
+    }
+  ]
+}

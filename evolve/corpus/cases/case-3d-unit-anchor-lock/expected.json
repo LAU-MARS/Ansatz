@@ -1,0 +1,8 @@
+{
+  "description": "三个非共线球副锚点完全固定自由刚体，作为尺度变化的基准",
+  "outcome": "converged",
+  "dof_total": 12,
+  "conflict_constraint_ids": [],
+  "dof_remaining": 0,
+  "redundant_constraint_ids": []
+}

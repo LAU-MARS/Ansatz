@@ -1,0 +1,8 @@
+{
+  "description": "锚点尺度放大到 1e12 仍完全固定自由刚体：平移列不能被全局相对秩阈值吞掉",
+  "outcome": "converged",
+  "dof_total": 12,
+  "conflict_constraint_ids": [],
+  "dof_remaining": 0,
+  "redundant_constraint_ids": []
+}

@@ -8,6 +8,7 @@ import ctypes
 import json
 import os
 import pathlib
+import struct
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -47,7 +48,8 @@ env = solve({
 })
 assert env["ok"], env
 report = env["result"]
-assert report["outcome"] == "underconstrained"
+assert report["outcome"] == "converged"
+assert report["diagnostics"]["dof_remaining"] == 1
 (x, y) = (report["entities"][0]["geometry"]["x"], report["entities"][0]["geometry"]["y"])
 assert (x, y) == (6.0, 8.0), (x, y)
 print(f"solve ok: (3,4) --d=10--> ({x}, {y}), outcome={report['outcome']}")
@@ -63,7 +65,7 @@ env = solve({
 assert env["ok"]
 diag = env["result"]["diagnostics"]
 assert env["result"]["outcome"] == "inconsistent"
-assert diag["redundant_constraints"][0]["constraint_ids"] == [1, 2]
+assert diag["conflicts"][0]["constraint_ids"] == [1, 2]
 assert diag["max_residual"]["residual"] == 2.0
 print("conflict model: ok=true, outcome=inconsistent, diagnostics complete")
 
@@ -75,5 +77,39 @@ finally:
     lib.ansatz_string_free(raw)
 assert not env["ok"] and env["error"]["kind"] == "invalid_json", env
 print("malformed json: ok=false, kind=invalid_json")
+
+# All committed parity models, including every residual and joint scalar.
+parity = ROOT / "crates" / "ansatz-core" / "tests" / "parity"
+bits = lambda value: "0x" + struct.pack(">d", value).hex().upper()
+for model_path in sorted(parity.glob("*.model.json")):
+    name = model_path.name.removesuffix(".model.json")
+    expected = json.loads((parity / f"{name}.expected.json").read_text(encoding="utf-8"))
+    envelope = solve(json.loads(model_path.read_text(encoding="utf-8")))
+    assert envelope["ok"], envelope
+    report = envelope["result"]
+    assert report["outcome"] == expected["outcome"]
+    assert len(report["entities"]) == len(expected["entities"])
+    for actual, wanted in zip(report["entities"], expected["entities"]):
+        assert actual["id"] == wanted["id"]
+        geometry = actual["geometry"]
+        if geometry["type"] == "point2":
+            assert bits(geometry["x"]) == wanted["x"]
+            assert bits(geometry["y"]) == wanted["y"]
+        else:
+            pose = geometry["pose"]
+            values = [pose["translation"][axis] for axis in "xyz"] + pose["rotation"]["vector"]
+            for field, value in zip(["tx", "ty", "tz", "rx", "ry", "rz"], values):
+                assert bits(value) == wanted["pose"][field], (name, field)
+    diag = report["diagnostics"]
+    assert diag["dof_total"] == expected["dof_total"]
+    assert diag["dof_remaining"] == expected["dof_remaining"]
+    assert bits(abs(diag["max_residual"]["residual"])) == expected["max_residual_abs"]
+    assert bits(diag["jacobian_condition_estimate"]) == expected["jacobian_condition_estimate"]
+    for field, scalar in [("residuals", "residual"), ("joints", "value")]:
+        assert len(diag[field]) == len(expected[field])
+        for actual, wanted in zip(diag[field], expected[field]):
+            assert actual["constraint_id"] == wanted["constraint_id"]
+            assert bits(actual[scalar]) == wanted[scalar], (name, field)
+    print(f"{name}: bit parity")
 
 print("FFI smoke: ALL PASS")

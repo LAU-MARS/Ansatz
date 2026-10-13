@@ -1,9 +1,10 @@
 {
-  "description": "(1,1) 归一化：sqrt/除法两次舍入，位级一致性的真检验",
-  "outcome": "underconstrained",
+  "description": "(1,1) 归一化到距离 1：走 sqrt/除法 的非精确路径",
+  "outcome": "converged",
   "dof_total": 2,
   "dof_remaining": 1,
-  "entities": [ { "id": 1, "x": "0x3FE6A09E667F3BCC", "y": "0x3FE6A09E667F3BCC" } ],
+  "entities": [ { "id": 1, "x": 0.7071067811865476, "y": 0.7071067811865476 } ],
+  "conflict_constraint_ids": [],
   "redundant_constraint_ids": [],
   "suggestion_actions": ["add_constraint:1"]
 }

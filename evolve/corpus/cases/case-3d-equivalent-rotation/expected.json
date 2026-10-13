@@ -1,0 +1,14 @@
+{
+  "description": "旋转向量 2π 与 0 表示同一物理姿态，局部切空间 DOF 应相同",
+  "outcome": "converged",
+  "dof_total": 12,
+  "conflict_constraint_ids": [],
+  "dof_remaining": 0,
+  "redundant_constraint_ids": [],
+  "joints": [
+    {
+      "constraint_id": 1,
+      "value": 0
+    }
+  ]
+}

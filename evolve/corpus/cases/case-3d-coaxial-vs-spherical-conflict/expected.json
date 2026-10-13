@@ -1,0 +1,7 @@
+{
+  "description": "coaxial 与轴外 spherical 无法满足，但局部驻点/左零空间不是全局无解证明；未实现该类几何证明时保守报告 not_converged",
+  "outcome": "not_converged",
+  "dof_total": 12,
+  "conflict_constraint_ids": [],
+  "redundant_constraint_ids": []
+}

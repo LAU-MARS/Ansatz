@@ -1,0 +1,8 @@
+{
+  "description": "初始两体原点重合、目标距离 1：确定性退化逃离；零雅可比不能证明无解",
+  "outcome": "converged",
+  "dof_total": 12,
+  "conflict_constraint_ids": [],
+  "dof_remaining": 5,
+  "redundant_constraint_ids": []
+}

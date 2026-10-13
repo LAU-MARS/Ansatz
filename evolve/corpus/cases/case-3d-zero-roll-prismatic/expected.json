@@ -1,0 +1,14 @@
+{
+  "description": "移动副 roll=0 与 drive=0 已锁定全部自由度：有向滚转方程不能在零角退化",
+  "outcome": "converged",
+  "dof_total": 12,
+  "conflict_constraint_ids": [],
+  "dof_remaining": 0,
+  "redundant_constraint_ids": [],
+  "joints": [
+    {
+      "constraint_id": 1,
+      "value": 0
+    }
+  ]
+}

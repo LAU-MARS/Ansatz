@@ -6,8 +6,8 @@
 //!
 //! | 退出码 | 含义 | 输出位置 |
 //! |--------|------|----------|
-//! | 0 | `Converged` | 报告 JSON → stdout |
-//! | 1 | 求解层失败（`Inconsistent` / `Overconstrained` / `Underconstrained` / `MaxIterations`），完整诊断照常输出 | 报告 JSON → stdout |
+//! | 0 | `converged`：返回位形满足全部约束（可能仍有剩余自由度或冗余，见诊断） | 报告 JSON → stdout |
+//! | 1 | 求解层失败（`inconsistent` / `not_converged`），完整诊断照常输出 | 报告 JSON → stdout |
 //! | 2 | 工具错误（非法 JSON / 模型无效 / 能力未实现） | 错误 JSON → stderr |
 //!
 //! 「求解失败」与「工具错误」严格区分：前者是求解器对几何事实的陈述，
