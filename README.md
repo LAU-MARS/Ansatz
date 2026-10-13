@@ -57,6 +57,14 @@ constraint evaluation produce `invalid_model`.
 support point-to-origin distance via a closed form. An already satisfied point
 is returned without reprojection, preserving coordinate bits on re-input.
 
+## Engineering documentation
+
+The [documentation index](docs/README.md) links the current
+[architecture and Mermaid diagrams](docs/architecture.md),
+[architecture decision records](docs/adr/README.md), and the
+[evolution roadmap](docs/roadmap.md). These engineering documents are in Chinese;
+implemented capabilities and proposed work are explicitly distinguished.
+
 ## Architecture
 
 ```
@@ -202,18 +210,25 @@ unit-norm equation to the solve.
 
 ## Roadmap
 
-1. ~~Stage 0 — skeleton: pipeline, diagnostics, contracts, CI, parity infra~~ ✅
-2. ~~Stage 1 — general numerical core (LM + analytic Jacobians)~~ ✅ (3D path; dense SVD via nalgebra)
-3. ~~Stage 2 — local rank analysis~~ ✅ (equilibrated SVD rank, direct conflict proofs, order-independent first-order redundancy groups)
-4. Stage 3 (in progress) — 3D assembly ✅ + robotics primitives (joint family / drive / transmission, P0–P1.5) ✅ → full 2D sketch set (todo)
-5. Stage 4 — HarmonyOS NAPI deliverable (ansatz-ffi + OHOS NDK)
-6. Later: screw joints, joint limits (inequalities), explicit assembly-mode selection, sparse backend, URDF import
+The [detailed roadmap](docs/roadmap.md) defines dependencies, evidence, and exit
+criteria. Its current sequence is:
 
-Parallel track (evolve/): A manual proposals (done) → B automated loop → C LLM
-proposer → D corpus co-evolution (RSI). The corpus includes a driven arm,
-conservative nonlinear-failure diagnostics, and the numerical audit regressions.
-Generated stress tests and held-out real models remain future work; passing
-this public corpus alone does not establish broad solver robustness.
+1. M0 — reliability foundation implemented: bounded numerics, corrected
+   semantics and diagnostics, independent geometry checks, and regression cases.
+2. M1 — expand generated tests, held-out real models, and measured quality gates.
+3. M2 — strengthen 3D solving for closed loops, degeneracies, scale, and branches.
+4. M3 — implement general 2D sketches after stable sub-element references and
+   workplane semantics are defined.
+5. M4 — graph decomposition, compiled models, incremental edits and dragging,
+   caches, and a deterministic sparse backend.
+6. M5 — validate real workflows and version compatibility, prioritize Onshape
+   integration, and extend geometry or mechanisms according to demonstrated needs.
+
+The separate evolve track remains at Stage A: baseline evaluation, lineage
+recording, and listing manual proposals. Automatic apply/build, LLM proposals,
+and corpus co-evolution are planned stages with additional evaluator and
+execution requirements. HarmonyOS delivery, joint limits, screw joints,
+splines, and URDF import are future work, not evidence of current capability.
 
 ## Acknowledgements
 
